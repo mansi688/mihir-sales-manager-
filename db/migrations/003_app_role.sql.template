@@ -1,7 +1,7 @@
 -- Login role the portal uses (via the Supabase connection pooler).
 -- Replace __PASSWORD__ with a long random password, run once in the Supabase SQL editor,
 -- then set DATABASE_URL in Vercel:
---   postgresql://sales_portal.<project-ref>:<password>@aws-1-ap-south-1.pooler.supabase.com:6543/postgres
+--   postgresql://sales_portal.<project-ref>:<password>@aws-0-ap-south-1.pooler.supabase.com:6543/postgres
 do $$ begin
   if not exists (select 1 from pg_roles where rolname = 'sales_portal') then
     create role sales_portal login password '__PASSWORD__';

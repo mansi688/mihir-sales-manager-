@@ -1,5 +1,8 @@
 # Mihir Group — Sales & Customer Portal
 
+**Live:** https://mihir-sales-portal.vercel.app  ·  staff app `/app/`  ·  kiosk `/kiosk/?key=<KIOSK_KEY>`
+Every push to `main` deploys automatically (Vercel project `mihir-sales-portal`, Mumbai region).
+
 Walk-in to booking in one system: **reception kiosk → automatic sales assignment → WhatsApp hand-off →
 site visit → booking form (real CRM inventory) → KYC → first payment → signatures → manager approval → Booked**.
 
@@ -58,7 +61,7 @@ Demo staff (**PIN 1234 — change them on the Team page**):
    - `db/migrations/003_app_role.sql.template` (replace `__PASSWORD__` with a long random password first)
 2. **Vercel:** import this GitHub repo (framework *Express* is detected; entry `src/server.js`, static files from `public/`).
 3. Add these environment variables:
-   - `DATABASE_URL` = `postgresql://sales_portal.<project-ref>:<password>@aws-1-ap-south-1.pooler.supabase.com:6543/postgres` (Supabase → Connect → *Transaction pooler*; the user is `sales_portal.<project-ref>`)
+   - `DATABASE_URL` = `postgresql://sales_portal.<project-ref>:<password>@aws-0-ap-south-1.pooler.supabase.com:6543/postgres` (Supabase → Connect → *Transaction pooler*; the user is `sales_portal.<project-ref>`)
    - `JWT_SECRET`, `KIOSK_KEY`, `INTERNAL_WEBHOOK_SECRET`: long random strings
    - optional: `ORG_WHATSAPP`, the `WA_*` settings, `PUBLIC_URL` (defaults to the Vercel production domain)
 4. Open `/health`. It should show `"ok": true` with the user count and flat count.
