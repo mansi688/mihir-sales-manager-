@@ -4,7 +4,7 @@
  */
 const jwt = require('jsonwebtoken');
 const config = require('../config');
-const { all, one, run, sql, logActivity, advanceStage, saveFile, getFile } = require('../db');
+const { all, one, run, tx, logActivity, advanceStage, saveFile, getFile } = require('../db');
 const { assign } = require('./assignment');
 const wa = require('./whatsapp');
 const { crm, inventory, accounts } = require('./integrations');
@@ -245,13 +245,13 @@ async function approveBooking(e, manager) {
     signatures: { customer: { ...sig.customer, image: images.customer }, sales: { ...sig.sales, image: images.sales }, manager: { signed_at: now } },
   });
 
-  const fileId = await sql.begin(async (tx) => {
-    const [f] = await tx.unsafe('INSERT INTO files(kind,mime,name,data) VALUES($1,$2,$3,$4) RETURNING id', ['booking_pdf', 'application/pdf', `Booking form ${e.id}.pdf`, pdf]);
-    await tx.unsafe('UPDATE bookings SET pdf_file_id=$1, hold_until=NULL WHERE enquiry_id=$2', [f.id, e.id]);
-    await tx.unsafe(`INSERT INTO signatures(enquiry_id,party,file_id,signed_by,signed_at) VALUES($1,'manager',NULL,$2,$3)
-        ON CONFLICT (enquiry_id,party) DO UPDATE SET signed_by=excluded.signed_by, signed_at=excluded.signed_at`, [e.id, manager.id, now]);
-    await tx.unsafe("UPDATE enquiries SET stage='Booked', updated_at=now() WHERE id=$1", [e.id]);
-    await tx.unsafe("INSERT INTO activities(enquiry_id,user_id,type,note) VALUES($1,$2,'approved',$3)", [e.id, manager.id, `Booking approved by ${manager.name} — ${full.booking.unit} booked`]);
+  const fileId = await tx(async (t) => {
+    const f = await t.one('INSERT INTO files(kind,mime,name,data) VALUES(?,?,?,?) RETURNING id', 'booking_pdf', 'application/pdf', `Booking form ${e.id}.pdf`, pdf);
+    await t.run('UPDATE bookings SET pdf_file_id=?, hold_until=NULL WHERE enquiry_id=?', f.id, e.id);
+    await t.run(`INSERT INTO signatures(enquiry_id,party,file_id,signed_by,signed_at) VALUES(?,'manager',NULL,?,?)
+        ON CONFLICT (enquiry_id,party) DO UPDATE SET signed_by=excluded.signed_by, signed_at=excluded.signed_at`, e.id, manager.id, now);
+    await t.run("UPDATE enquiries SET stage='Booked', updated_at=now() WHERE id=?", e.id);
+    await t.run("INSERT INTO activities(enquiry_id,user_id,type,note) VALUES(?,?,'approved',?)", e.id, manager.id, `Booking approved by ${manager.name} — ${full.booking.unit} booked`);
     return f.id;
   });
 

@@ -149,6 +149,6 @@ const ok = (r, label) => { if (r.status >= 400) { console.error(label, r.status,
   console.log(`  ✓ ${out.whatsapp.length} WhatsApp messages, ${out.sync.length} sync calls recorded`);
 
   console.log('\nAll checks passed.');
-  server.close(); await require('../src/db').sql.end();
+  server.close(); await require('../src/db').pool.end();
   psql(ADMIN, '-c', `drop database ${DB}`);
 })().catch((err) => { console.error(err); process.exit(1); });

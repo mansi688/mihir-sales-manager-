@@ -1,35 +1,50 @@
 /**
- * Postgres (Supabase) access. The app connects as the `sales_portal` role whose search_path is
+ * Postgres (Supabase) access via `pg`. The app connects as the `sales_portal` role whose search_path is
  * `sales, public`, so unqualified table names are the portal's own; CRM tables are written as public.*.
  * Use `?` placeholders — they're converted to $1, $2… here.
  */
-const pgmod = require('postgres');
-const postgres = pgmod.default || pgmod;
+const { Pool, types } = require('pg');
 const config = require('./config');
 
-if (!config.databaseUrl) {
-  console.error('[db] DATABASE_URL is not set — see README.');
-}
+types.setTypeParser(1700, (v) => (v === null ? null : Number(v))); // numeric → number
+types.setTypeParser(20, (v) => (v === null ? null : Number(v)));   // bigint (ids, counts) → number
 
-const sql = postgres(config.databaseUrl || 'postgres://invalid', {
-  prepare: false,                          // required by the Supabase transaction pooler
+if (!config.databaseUrl) console.error('[db] DATABASE_URL is not set — see README.');
+
+const local = /localhost|127\.0\.0\.1/.test(config.databaseUrl || '');
+const pool = new Pool({
+  connectionString: config.databaseUrl || undefined,
   max: process.env.VERCEL ? 3 : 10,
-  idle_timeout: 20,
-  connect_timeout: 15,
-  ssl: /localhost|127\.0\.0\.1/.test(config.databaseUrl || '') ? false : 'require',
-  onnotice: () => {},
-  types: { numeric: { to: 1700, from: [1700], serialize: (x) => String(x), parse: (x) => Number(x) } },
-  transform: { undefined: null },
+  idleTimeoutMillis: 20000,
+  connectionTimeoutMillis: 15000,
+  ssl: local ? false : { rejectUnauthorized: false },
 });
+pool.on('error', (err) => console.error('[db] idle client error', err.message));
 
 const STAGES = ['Walk-in', 'Attending', 'Site visit', 'Booking form', 'KYC', 'Payment', 'Signatures', 'Booked', 'Lost'];
 const ROLES = ['sales', 'reception', 'manager', 'accounts', 'admin'];
 const USER_STATUSES = ['Available', 'With customer', 'On site visit', 'Off'];
 
 const toPg = (q) => { let i = 0; return q.replace(/\?/g, () => '$' + (++i)); };
-const all = (q, ...p) => sql.unsafe(toPg(q), p);
-const one = async (q, ...p) => (await all(q, ...p))[0];
-const run = (q, ...p) => all(q, ...p);
+const helpers = (runner) => {
+  const all = async (q, ...p) => (await runner.query(toPg(q), p)).rows;
+  return { all, one: async (q, ...p) => (await all(q, ...p))[0], run: all };
+};
+const { all, one, run } = helpers(pool);
+
+/** Run fn({all, one, run}) inside a transaction. */
+async function tx(fn) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const out = await fn(helpers(client));
+    await client.query('COMMIT');
+    return out;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally { client.release(); }
+}
 
 async function logActivity(enquiryId, userId, type, note = '') {
   await run('INSERT INTO activities(enquiry_id,user_id,type,note) VALUES(?,?,?,?)', enquiryId, userId || null, type, note);
@@ -44,9 +59,8 @@ async function advanceStage(enquiryId, to) {
 }
 
 async function saveFile(kind, mime, name, buffer) {
-  const r = await one('INSERT INTO files(kind,mime,name,data) VALUES(?,?,?,?) RETURNING id', kind, mime, name || '', buffer);
-  return r.id;
+  return (await one('INSERT INTO files(kind,mime,name,data) VALUES(?,?,?,?) RETURNING id', kind, mime, name || '', buffer)).id;
 }
 const getFile = (id) => one('SELECT * FROM files WHERE id=?', id);
 
-module.exports = { sql, all, one, run, STAGES, ROLES, USER_STATUSES, logActivity, advanceStage, saveFile, getFile };
+module.exports = { pool, all, one, run, tx, STAGES, ROLES, USER_STATUSES, logActivity, advanceStage, saveFile, getFile };
