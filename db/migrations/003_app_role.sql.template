@@ -1,0 +1,38 @@
+-- Login role the portal uses (via the Supabase connection pooler).
+-- Replace __PASSWORD__ with a long random password, run once in the Supabase SQL editor,
+-- then set DATABASE_URL in Vercel:
+--   postgresql://sales_portal.<project-ref>:<password>@aws-1-ap-south-1.pooler.supabase.com:6543/postgres
+do $$ begin
+  if not exists (select 1 from pg_roles where rolname = 'sales_portal') then
+    create role sales_portal login password '__PASSWORD__';
+  else
+    alter role sales_portal with login password '__PASSWORD__';
+  end if;
+end $$;
+alter role sales_portal set search_path = sales, public;
+
+grant usage on schema sales to sales_portal;
+grant all on all tables in schema sales to sales_portal;
+grant all on all sequences in schema sales to sales_portal;
+alter default privileges in schema sales grant all on tables to sales_portal;
+alter default privileges in schema sales grant all on sequences to sales_portal;
+
+-- Read the CRM's inventory, create/update CRM enquiries
+grant usage on schema public to sales_portal;
+grant select on public.projects, public.towers, public.wings, public.flats to sales_portal;
+grant select, insert, update on public.enquiries to sales_portal;
+
+-- The CRM tables use row-level security: add policies scoped to this role only.
+do $$ declare t text; begin
+  foreach t in array array['projects','towers','wings','flats','enquiries'] loop
+    if not exists (select 1 from pg_policies where schemaname='public' and tablename=t and policyname='sales_portal_select') then
+      execute format('create policy sales_portal_select on public.%I for select to sales_portal using (true)', t);
+    end if;
+  end loop;
+  if not exists (select 1 from pg_policies where schemaname='public' and tablename='enquiries' and policyname='sales_portal_insert') then
+    create policy sales_portal_insert on public.enquiries for insert to sales_portal with check (true);
+  end if;
+  if not exists (select 1 from pg_policies where schemaname='public' and tablename='enquiries' and policyname='sales_portal_update') then
+    create policy sales_portal_update on public.enquiries for update to sales_portal using (true) with check (true);
+  end if;
+end $$;

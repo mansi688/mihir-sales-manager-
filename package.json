@@ -1,0 +1,26 @@
+{
+  "name": "mihir-sales-portal",
+  "version": "0.1.0",
+  "description": "Mihir Group sales & customer portal — walk-in kiosk to booking",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node scripts/smoke-test.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^18.0.10",
+    "express": "^5.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "multer": "^2.5.0",
+    "pdfkit": "^0.20.2",
+    "postgres": "^4.1.1",
+    "qrcode": "^1.5.4"
+  },
+  "private": true,
+  "engines": {
+    "node": "22.x"
+  }
+}
