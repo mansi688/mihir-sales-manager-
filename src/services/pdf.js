@@ -8,7 +8,7 @@ const LOGO = require('../assets/logo');
 let LOGO_LIGHT = null; try { LOGO_LIGHT = require('../assets/logo-light'); } catch { /* optional */ }
 const BF = require('../content/booking-form');
 
-const NAVY = '#23284A'; const NAVY2 = '#343A5E'; const COPPER = '#C4895A'; const LINE = '#D9D4CB'; const MUTED = '#6B6F80'; const SOFT = '#F6F2EC';
+const NAVY = '#1B1E4B'; const NAVY2 = '#2A2E6E'; const COPPER = '#BC7A45'; const AQUA = '#0A8B97'; const AQUA_P = '#E9F7F7'; const LINE = '#DED8CC'; const MUTED = '#6F7290'; const SOFT = '#FAF7F0';
 const M = 44; const W = 595.28 - M * 2; const BOTTOM = 841.89 - 52;
 
 const rs = (n) => (n === null || n === undefined || n === '' || Number.isNaN(Number(n)) ? '' : 'Rs. ' + Number(n).toLocaleString('en-IN'));
@@ -305,4 +305,85 @@ function enquiryPdf(o) {
   });
 }
 
-module.exports = { bookingPdf, enquiryPdf };
+/* ---------- Quotation / cost sheet (single A4 page) ---------- */
+function quotationPdf({ q, enquiry, rm }) {
+  const c = q.data; const inp = c.inputs || {};
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: 'A4', margins: { top: M, bottom: 20, left: M, right: M }, info: { Title: `Quotation ${q.id}`, Author: config.org.name } });
+    const chunks = [];
+    doc.on('data', (x) => chunks.push(x)); doc.on('end', () => resolve(Buffer.concat(chunks))); doc.on('error', reject);
+    const R = 595.28 - M;
+
+    doc.rect(0, 0, 595.28, 96).fill(NAVY);
+    doc.image(LOGO_LIGHT || LOGO, M, 18, { height: 60 });
+    doc.font('Helvetica-Bold').fontSize(18).fillColor('#fff').text('QUOTATION', 0, 28, { width: R, align: 'right', characterSpacing: 1 });
+    doc.font('Helvetica').fontSize(9).fillColor('#E9CDB3').text(`${q.id}   ·   ${ist(q.created_at)}   ·   Valid till ${ist(q.valid_until)}`, 0, 52, { width: R, align: 'right' });
+    doc.rect(0, 96, 595.28, 3).fill(COPPER);
+
+    let y = 116;
+    const block = (x, w, title, rows) => {
+      doc.font('Helvetica-Bold').fontSize(8).fillColor(COPPER).text(title.toUpperCase(), x, y, { characterSpacing: 0.8 });
+      let yy = y + 14;
+      for (const [k, v] of rows) {
+        doc.font('Helvetica').fontSize(7.5).fillColor(MUTED).text(k, x, yy);
+        doc.font('Helvetica-Bold').fontSize(10).fillColor('#1d1f2e').text(T(v || '—'), x, yy + 9, { width: w, height: 13, ellipsis: true });
+        yy += 27;
+      }
+      return yy;
+    };
+    const half = (W - 20) / 2;
+    const y1 = block(M, half, 'Prepared for', [['Name', enquiry.name], ['Mobile', '+91 ' + enquiry.mobile], ['Enquiry', enquiry.id]]);
+    const y2 = block(M + half + 20, half, 'Property', [['Project', enquiry.project_name], ['Unit', q.unit_label || '—'], ['Configuration · Carpet area', `${enquiry.config} · ${inp.carpet || '—'} sq ft (RERA)`]]);
+    y = Math.max(y1, y2) + 6;
+
+    // cost table
+    const groups = [['agreement', 'A. Agreement value'], ['govt', 'B. Government taxes & charges'], ['other', 'C. Other charges']];
+    const sums = { agreement: c.agreement, govt: c.gst + c.stamp + c.reg, other: inp.otherCharges || 0 };
+    doc.roundedRect(M, y, W, 22, 3).fill(NAVY2);
+    doc.font('Helvetica-Bold').fontSize(8.5).fillColor('#fff').text('PARTICULARS', M + 10, y + 7).text('AMOUNT', M, y + 7, { width: W - 10, align: 'right' });
+    y += 28;
+    for (const [g, title] of groups) {
+      const lines = c.lines.filter((l) => l.group === g); if (!lines.length) continue;
+      doc.font('Helvetica-Bold').fontSize(9).fillColor(NAVY2).text(title, M + 4, y); y += 15;
+      for (const l of lines) {
+        doc.font('Helvetica').fontSize(9.5).fillColor('#2a2c3a').text(T(l.label), M + 14, y, { width: W - 160 });
+        doc.font('Helvetica-Bold').text(rs(l.amount), M, y, { width: W - 10, align: 'right' });
+        y += 17; doc.moveTo(M + 14, y - 4).lineTo(M + W, y - 4).lineWidth(0.4).strokeColor(LINE).stroke();
+      }
+      doc.rect(M, y - 2, W, 18).fill(SOFT);
+      doc.font('Helvetica-Bold').fontSize(9).fillColor(NAVY2).text(`Sub-total ${title.slice(0, 1)}`, M + 14, y + 3).text(rs(sums[g]), M, y + 3, { width: W - 10, align: 'right' });
+      y += 24;
+    }
+    doc.roundedRect(M, y, W, 40, 4).fill(NAVY);
+    doc.font('Helvetica').fontSize(8).fillColor('#C9CBE6').text('TOTAL COST (A + B + C)', M + 14, y + 9, { characterSpacing: 0.8 });
+    doc.font('Helvetica-Bold').fontSize(16).fillColor('#fff').text(rs(c.total), M, y + 12, { width: W - 14, align: 'right' });
+    y += 52;
+
+    doc.roundedRect(M, y, W, 34, 4).fill(AQUA_P);
+    doc.font('Helvetica-Bold').fontSize(9).fillColor(AQUA).text(`Booking amount: up to ${rs(c.bookingAmount)}`, M + 12, y + 7);
+    doc.font('Helvetica').fontSize(8).fillColor('#2a2c3a').text('As per RERA, not more than 10% of the agreement value is collected before registering the Agreement for Sale. The balance follows the construction-linked plan.', M + 12, y + 19, { width: W - 24 });
+    y += 46;
+
+    doc.font('Helvetica-Bold').fontSize(8.5).fillColor(NAVY2).text('Terms', M, y); y += 12;
+    const terms = [
+      `This quotation is valid till ${ist(q.valid_until)} and is subject to unit availability at the time of booking.`,
+      'Government taxes and charges are at prevailing rates and are payable at actuals; any change in rates will be applicable.',
+      'Stamp duty concession, if any (e.g. for women buyers), is applied at registration as per Government notification.',
+      'This is an indicative cost sheet, not an offer or allotment. The Agreement for Sale shall prevail.',
+    ];
+    doc.font('Helvetica').fontSize(7.8).fillColor('#3a3c4a');
+    terms.forEach((t, i) => { doc.text(`${i + 1}. ${t}`, M, y, { width: W }); y = doc.y + 2; });
+
+    // relationship manager footer
+    const fy = 841.89 - 92;
+    doc.moveTo(M, fy).lineTo(M + W, fy).lineWidth(1).strokeColor(COPPER).stroke();
+    doc.font('Helvetica').fontSize(7.5).fillColor(MUTED).text('YOUR RELATIONSHIP MANAGER', M, fy + 10, { characterSpacing: 0.8 });
+    doc.font('Helvetica-Bold').fontSize(11).fillColor(NAVY).text(rm ? rm.name : config.org.name, M, fy + 22);
+    doc.font('Helvetica').fontSize(8.5).fillColor('#3a3c4a').text(rm ? `${rm.designation}  ·  ${fmtPhone(rm.phone)}  ·  ${rm.email}` : '', M, fy + 37);
+    doc.font('Helvetica').fontSize(8).fillColor(MUTED).text(`${config.org.name} · ${config.org.website}`, M, fy + 22, { width: W, align: 'right' });
+    doc.font('Helvetica-Oblique').fontSize(8).fillColor(COPPER).text(config.org.tagline, M, fy + 37, { width: W, align: 'right' });
+    doc.end();
+  });
+}
+
+module.exports = { bookingPdf, enquiryPdf, quotationPdf };

@@ -26,8 +26,29 @@ r.get('/api/public/config', ah(async (_req, res) => {
 r.post('/api/kiosk/enquiries', requireKiosk, ah(async (req, res) => {
   const out = await wf.createEnquiry(req.body || {});
   const link = wa.kioskLink(out.enquiry.id);
-  const qr = await QRCode.toDataURL(link, { margin: 1, width: 360, color: { dark: '#343A5E', light: '#FFFFFF' } });
+  const qr = await QRCode.toDataURL(link, { margin: 1, width: 360, color: { dark: '#2A2E6E', light: '#FFFFFF' } });
   res.json({ id: out.enquiry.id, firstName: out.enquiry.name.split(' ')[0], sales: out.sales, whatsappLink: link, qr, busy: !!out.assignment.busy });
+}));
+
+/* ---------- Customer portal: online enquiry (shared over WhatsApp) ---------- */
+const hits = new Map();
+function throttle(req, res, next) {
+  const ip = String(req.get('x-forwarded-for') || req.ip || '').split(',')[0].trim();
+  const now = Date.now(); const h = (hits.get(ip) || []).filter((t) => now - t < 3600e3);
+  if (h.length >= 8) return res.status(429).json({ error: 'Too many enquiries from this device. Please call us instead.' });
+  h.push(now); hits.set(ip, h); if (hits.size > 5000) hits.clear(); next();
+}
+r.get('/api/public/rm/:slug', ah(async (req, res) => {
+  const u = await one("SELECT * FROM users WHERE slug=? AND active AND role IN ('sales','manager')", req.params.slug);
+  if (!u) return res.status(404).json({ error: 'Not found' });
+  const p = wf.publicProfile(u);
+  res.json({ name: u.name, designation: u.designation, photoUrl: p.photoUrl, slug: u.slug });
+}));
+r.post('/api/public/enquiries', throttle, ah(async (req, res) => {
+  const b = req.body || {};
+  if (b.website) return res.json({ id: 'MG-0000', firstName: 'there', sales: null }); // honeypot
+  const out = await wf.createEnquiry({ ...b, channel: 'online', source: b.source || 'WhatsApp' });
+  res.json({ id: out.enquiry.id, firstName: out.enquiry.name.split(' ')[0], sales: out.sales, whatsappLink: wa.kioskLink(out.enquiry.id), busy: !!out.assignment.busy });
 }));
 
 r.get('/card/:slug.vcf', ah(async (req, res) => {
@@ -42,7 +63,7 @@ r.get('/card/:slug.vcf', ah(async (req, res) => {
 r.get('/card/:slug/qr.png', ah(async (req, res) => {
   const u = await one('SELECT slug FROM users WHERE slug=? AND active', req.params.slug);
   if (!u) return res.status(404).end();
-  const png = await QRCode.toBuffer(`${config.publicUrl}/card/${u.slug}`, { margin: 1, width: 420, color: { dark: '#262B52', light: '#FFFFFF' } });
+  const png = await QRCode.toBuffer(`${config.publicUrl}/card/${u.slug}`, { margin: 1, width: 420, color: { dark: '#2A2E6E', light: '#FFFFFF' } });
   res.set('Cache-Control', 'public, max-age=86400').type('png').send(png);
 }));
 
@@ -56,7 +77,7 @@ r.get('/card/:slug', ah(async (req, res) => {
     photoUrl: p.photoUrl, cardUrl: p.cardUrl, qrUrl: `/card/${u.slug}/qr.png` };
   const icon = (d) => `<svg class="ic" viewBox="0 0 24 24">${d}</svg>`;
   res.send(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>${esc(u.name)} — ${esc(config.org.name)}</title><meta name="theme-color" content="#F4F2EE">
+<title>${esc(u.name)} — ${esc(config.org.name)}</title><meta name="theme-color" content="#FAF7F0">
 <meta name="description" content="${esc(u.designation)} at ${esc(config.org.name)}. ${esc(config.org.tagline)}.">
 <meta property="og:title" content="${esc(u.name)} · ${esc(u.designation)}"><meta property="og:description" content="${esc(config.org.name)} — ${esc(config.org.tagline)}">
 <meta property="og:image" content="${config.publicUrl}${p.photoUrl || '/assets/icon-512.png'}"><link rel="icon" href="/assets/mark.png"><link rel="apple-touch-icon" href="/assets/icon-192.png">
@@ -70,6 +91,7 @@ r.get('/card/:slug', ah(async (req, res) => {
     <a class="act" href="mailto:${esc(u.email)}">${icon('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>')}Email</a>
     <a class="act" href="/card/${esc(u.slug)}.vcf">${icon('<path d="M12 4v11m0 0-4-4m4 4 4-4"/><path d="M5 20h14"/>')}Save</a>
   </div>
+  <a class="btn cu lg full" href="/enquire/?rm=${esc(u.slug)}">${icon('<path d="M4 21V8l8-5 8 5v13"/><path d="M9 21v-6h6v6"/>')} Enquire about a home</a>
   <button class="btn line full" id="shareBtn">${icon('<circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.8 7.6-4.4M8.2 13.2l7.6 4.4"/>')} Share this card</button>
   ${projects.length ? `<div class="card p box"><div class="over mb-12">Projects</div><div class="list">${projects.map((x) => `<div class="li"><span class="avatar" style="border-radius:12px;background:var(--cu-t);color:var(--cu-d)">${icon('<path d="M4 21V8l8-5 8 5v13"/><path d="M9 21v-6h6v6"/>')}</span><div class="grow"><b>${esc(x.name)}</b><div class="xs muted">${esc(x.location_label || x.city || '')}</div></div></div>`).join('')}</div></div>` : ''}
   <footer><img src="/assets/logo.png" alt="${esc(config.org.name)}"><span>${esc(config.org.tagline)} · <a href="https://${esc(config.org.website)}">${esc(config.org.website)}</a></span></footer>

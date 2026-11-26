@@ -33,7 +33,7 @@ function getEnquiry(id) {
 async function fullEnquiry(id) {
   const e = await getEnquiry(id);
   if (!e) return null;
-  const [activities, booking, kyc, payments, sigs, sync, whatsapp] = await Promise.all([
+  const [activities, booking, kyc, payments, sigs, sync, whatsapp, followups, quotations] = await Promise.all([
     all('SELECT a.*, u.name user_name FROM activities a LEFT JOIN users u ON u.id=a.user_id WHERE enquiry_id=? ORDER BY a.id DESC', id),
     one('SELECT * FROM bookings WHERE enquiry_id=?', id),
     all('SELECT id, kind, file_id, original_name, uploaded_at FROM kyc_docs WHERE enquiry_id=? ORDER BY id', id),
@@ -41,8 +41,10 @@ async function fullEnquiry(id) {
     all('SELECT enquiry_id, party, file_id, signed_by, signed_at FROM signatures WHERE enquiry_id=?', id),
     all('SELECT * FROM sync_log WHERE enquiry_id=? ORDER BY id DESC LIMIT 50', id),
     all('SELECT * FROM wa_messages WHERE enquiry_id=? ORDER BY id DESC LIMIT 30', id),
+    all('SELECT f.*, u.name created_name, d.name done_name FROM followups f LEFT JOIN users u ON u.id=f.created_by LEFT JOIN users d ON d.id=f.done_by WHERE enquiry_id=? ORDER BY (f.done_at IS NOT NULL), f.due_at', id).catch(() => []),
+    all('SELECT q.id, q.unit_label, q.total, q.valid_until, q.created_at, u.name created_name FROM quotations q LEFT JOIN users u ON u.id=q.created_by WHERE enquiry_id=? ORDER BY q.created_at DESC', id).catch(() => []),
   ]);
-  return { ...e, activities, booking: booking || null, kyc, payments, signatures: Object.fromEntries(sigs.map((s) => [s.party, s])), sync, whatsapp };
+  return { ...e, activities, booking: booking || null, kyc, payments, signatures: Object.fromEntries(sigs.map((s) => [s.party, s])), sync, whatsapp, followups, quotations };
 }
 
 function publicProfile(u) {
@@ -66,19 +68,25 @@ async function createEnquiry(input) {
   if (!input.config || !input.budget || !input.source) throw httpError(400, 'Please complete all required fields');
   if (!input.consent) throw httpError(400, 'Consent is required');
 
-  const a = await assign({ mobile, projectId: project.id, cpName: input.source === 'Channel partner' ? String(input.cpName || '') : '' });
+  const online = input.channel === 'online';
+  let a = null;
+  if (online && input.rm) {
+    const rm = await one("SELECT id, name FROM users WHERE slug=? AND active AND role IN ('sales','manager')", String(input.rm));
+    if (rm) a = { userId: rm.id, reason: `Online enquiry via ${rm.name}'s link` };
+  }
+  if (!a) a = await assign({ mobile, projectId: project.id, cpName: input.source === 'Channel partner' ? String(input.cpName || '') : '' });
   const row = await one(`INSERT INTO enquiries(name,mobile,email,residence,project_id,config,budget,purpose,source,cp_name,visit_pref,consent,assigned_to,assign_reason)
       VALUES(?,?,?,?,?,?,?,?,?,?,?,true,?,?) RETURNING id`, name.slice(0, 120), mobile, String(input.email || '').trim(), String(input.residence || '').trim(),
   project.id, String(input.config), String(input.budget), String(input.purpose || ''), String(input.source), String(input.cpName || '').trim(), String(input.visitPref || ''),
   a.userId, a.reason);
   const id = row.id;
-  await logActivity(id, null, 'created', 'Enquiry submitted at reception kiosk');
+  await logActivity(id, null, 'created', online ? 'Enquiry submitted online (customer portal)' : 'Enquiry submitted at reception kiosk');
   const u = a.userId ? await userById(a.userId) : null;
   await logActivity(id, null, 'assigned', u ? `Assigned to ${u.name} — ${a.reason}` : a.reason);
 
   const e = await getEnquiry(id);
   await Promise.all([
-    u ? wa.template(u.phone, id, config.wa.tplSalesAlert, salesAlertParams(e, u), salesAlertPreview(e, a.reason)) : null,
+    u ? wa.template(u.phone, id, config.wa.tplSalesAlert, salesAlertParams(e, u), online ? salesAlertPreview(e, a.reason).replace('New walk-in', 'New online enquiry').replace('Customer is at reception.', 'Enquired online — please call or WhatsApp them.') : salesAlertPreview(e, a.reason)) : null,
     crm.upsertLead(e),
   ]);
   return { enquiry: e, assignment: a, sales: u ? publicProfile(u) : null };

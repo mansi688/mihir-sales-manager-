@@ -84,9 +84,11 @@ r.get('/api/enquiries', ANY, ah(async (req, res) => {
   if (req.query.today === '1') { where.push('e.created_at>=?'); args.push(todayStartUtc()); }
   if (req.query.q) { where.push('(e.name ILIKE ? OR e.mobile LIKE ? OR e.id ILIKE ?)'); const q = `%${req.query.q}%`; args.push(q, q, q); }
   res.json({
-    enquiries: await all(`SELECT e.*, p.name project_name, u.name assigned_name FROM enquiries e
+    enquiries: await all(`SELECT e.*, p.name project_name, u.name assigned_name,
+        (SELECT min(f.due_at) FROM followups f WHERE f.enquiry_id=e.id AND f.done_at IS NULL) next_followup,
+        (SELECT max(a.at) FROM activities a WHERE a.enquiry_id=e.id) last_activity FROM enquiries e
       JOIN public.projects p ON p.id=e.project_id LEFT JOIN users u ON u.id=e.assigned_to
-      ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY e.created_at DESC LIMIT 500`, ...args),
+      ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY e.created_at DESC LIMIT 1000`, ...args),
   });
 }));
 
@@ -182,7 +184,9 @@ r.get('/api/stats', ANY, ah(async (req, res) => {
   const today = await one(`SELECT count(*)::int c FROM enquiries WHERE created_at>=? ${mine ? 'AND assigned_to=?' : ''}`, todayStartUtc(), ...args);
   const pending = await one("SELECT count(*)::int c FROM payments WHERE status='Pending verification'");
   const approvals = await one("SELECT count(*)::int c FROM enquiries WHERE stage='Signatures'");
-  res.json({ stages: Object.fromEntries(stages.map((x) => [x.stage, x.c])), bookedThisMonth: booked.c, valueThisMonth: booked.v, today: today.c, pendingPayments: pending.c, approvals: approvals.c });
+  const fu = await one(`SELECT count(*) FILTER (WHERE f.due_at<now())::int overdue, count(*) FILTER (WHERE f.due_at<?::timestamptz + interval '1 day')::int due
+      FROM followups f JOIN enquiries e ON e.id=f.enquiry_id WHERE f.done_at IS NULL ${mine ? 'AND e.assigned_to=?' : ''}`, todayStartUtc(), ...args);
+  res.json({ stages: Object.fromEntries(stages.map((x) => [x.stage, x.c])), bookedThisMonth: booked.c, valueThisMonth: booked.v, today: today.c, pendingPayments: pending.c, approvals: approvals.c, followupsDue: fu.due, followupsOverdue: fu.overdue });
 }));
 
 /* ---------- Inventory (real CRM flats) ---------- */

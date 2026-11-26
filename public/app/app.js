@@ -52,6 +52,11 @@
     alert: '<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>',
     copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
     lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+    cal: '<rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="m9 15 2 2 4-4"/>',
+    quote: '<path d="M7 3h7l5 5v12.5a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5z"/><path d="M14 3v5h5"/><path d="M9.5 12.5h5M9.5 12.5c2 0 3 .8 3 2s-1 2-3 2l3.5 3M9.5 14.5h5"/>',
+    download: '<path d="M12 4v11m0 0-4-4m4 4 4-4"/><path d="M5 20h14"/>',
+    trend: '<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>',
+    link: '<path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/>',
   };
   const ic = (n, s) => `<svg class="ic" viewBox="0 0 24 24"${s ? ` style="width:${s}px;height:${s}px"` : ''}>${P[n] || ''}</svg>`;
 
@@ -70,13 +75,13 @@
   const run = (fn) => async (...a) => { try { return await fn(...a); } catch (e) { toast(e.message, true); } };
 
   /* ======================= state & nav ======================= */
-  const state = { user: null, org: null, stages: [], statuses: [], form: null, kiosk: null, view: { mode: 'list', stage: '', q: '' } };
+  const state = { user: null, org: null, stages: [], statuses: [], form: null, kiosk: null, view: { mode: '', stage: '', q: '', project: '', owner: '', source: '', period: '', sort: 'created_at', dir: -1 }, days: 30 };
   const NAV = {
-    sales: [['home', 'Home', 'home'], ['customers', 'Customers', 'users'], ['forms', 'Forms', 'print'], ['profile', 'My card', 'card']],
-    reception: [['board', 'Dashboard', 'board'], ['customers', 'Enquiries', 'users'], ['whatsapp', 'WhatsApp', 'wa'], ['forms', 'Forms', 'print']],
-    manager: [['board', 'Dashboard', 'board'], ['customers', 'Customers', 'users'], ['approvals', 'Approvals', 'stamp'], ['team', 'Team', 'team'], ['whatsapp', 'WhatsApp', 'wa'], ['forms', 'Forms', 'print'], ['profile', 'My card', 'card']],
-    accounts: [['payments', 'Payments', 'rupee'], ['customers', 'Customers', 'users'], ['forms', 'Forms', 'print']],
-    admin: [['board', 'Dashboard', 'board'], ['customers', 'Customers', 'users'], ['approvals', 'Approvals', 'stamp'], ['payments', 'Payments', 'rupee'], ['team', 'Team', 'team'], ['whatsapp', 'WhatsApp', 'wa'], ['forms', 'Forms', 'print']],
+    sales: [['home', 'Home', 'home'], ['customers', 'Customers', 'users'], ['followups', 'Follow-ups', 'cal'], ['profile', 'My card', 'card'], ['quotations', 'Quotations', 'quote'], ['forms', 'Forms', 'print']],
+    reception: [['board', 'Dashboard', 'board'], ['customers', 'Enquiries', 'users'], ['followups', 'Follow-ups', 'cal'], ['whatsapp', 'WhatsApp', 'wa'], ['forms', 'Forms', 'print']],
+    manager: [['board', 'Dashboard', 'board'], ['customers', 'Customers', 'users'], ['followups', 'Follow-ups', 'cal'], ['quotations', 'Quotations', 'quote'], ['approvals', 'Approvals', 'stamp'], ['team', 'Team', 'team'], ['whatsapp', 'WhatsApp', 'wa'], ['forms', 'Forms', 'print'], ['profile', 'My card', 'card']],
+    accounts: [['payments', 'Payments', 'rupee'], ['customers', 'Customers', 'users'], ['quotations', 'Quotations', 'quote'], ['forms', 'Forms', 'print']],
+    admin: [['board', 'Dashboard', 'board'], ['customers', 'Customers', 'users'], ['followups', 'Follow-ups', 'cal'], ['quotations', 'Quotations', 'quote'], ['approvals', 'Approvals', 'stamp'], ['payments', 'Payments', 'rupee'], ['team', 'Team', 'team'], ['whatsapp', 'WhatsApp', 'wa'], ['forms', 'Forms', 'print']],
   };
   const nav = () => NAV[state.user.role] || NAV.sales;
   const can = {
@@ -142,7 +147,7 @@
     try {
       const s = await api('/api/stats'); state.stats = s;
       const set = (k, n) => { const el = qs(`[data-cnt="${k}"]`); if (el) { el.textContent = n; el.classList.toggle('hide', !n); } };
-      set('approvals', s.approvals); set('payments', s.pendingPayments);
+      set('approvals', s.approvals); set('payments', s.pendingPayments); set('followups', s.followupsDue);
     } catch { /* ignore */ }
   }
 
@@ -156,7 +161,7 @@
     if (h.startsWith('c-')) { mark('customers'); return guard(viewCustomer(h.slice(2))); }
     const v = allowed.includes(h) ? h : allowed[0];
     mark(v);
-    const fn = { home: viewHome, board: viewBoard, customers: viewCustomers, approvals: viewApprovals, payments: viewPayments, team: viewTeam, whatsapp: viewWhatsApp, forms: viewForms, profile: viewProfile }[v];
+    const fn = { home: viewHome, board: viewBoard, customers: viewCustomers, followups: viewFollowups, quotations: viewQuotations, approvals: viewApprovals, payments: viewPayments, team: viewTeam, whatsapp: viewWhatsApp, forms: viewForms, profile: viewProfile }[v];
     guard(fn());
   }
   const mark = (v) => qsa('#nav a, #tabbar a').forEach((a) => a.classList.toggle('on', a.dataset.v === v));
@@ -203,21 +208,24 @@
   async function viewHome() {
     loading();
     const u = state.user;
-    const [{ enquiries }, s] = await Promise.all([api('/api/enquiries?mine=1'), api('/api/stats')]);
+    const [{ enquiries }, s, { followups }] = await Promise.all([api('/api/enquiries?mine=1'), api('/api/stats'), api('/api/followups')]);
+    const dueF = followups.filter((f) => new Date(f.due_at) < endOfToday());
     const active = enquiries.filter((e) => !['Booked', 'Lost'].includes(e.stage));
     const hr = new Date().getHours(); const greet = hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening';
     $('view').innerHTML = `<div class="fade-in">
       <div class="hero rings"><div class="grow"><div class="over" style="color:var(--cu-l)">${greet}, ${esc(first(u.name))}</div><h1 style="font-size:28px;margin-top:6px">You have ${active.length} active customer${active.length === 1 ? '' : 's'}</h1>
         <div class="sub mt-8">${u.projects.map((p) => esc(p.name)).join(' · ') || 'No projects assigned yet'}</div></div>
-        <div class="stack gap-6"><span class="over" style="color:#C5C9DE">My status</span><div class="status-pick" id="st">${state.statuses.map((x) => `<button data-s="${x}" class="${u.status === x ? 'on' : ''}"><span class="dot ${slugS(x)}"></span>${x}</button>`).join('')}</div></div></div>
-      <div class="g g4 mt-16">${tile('New today', s.today, 'bolt', 'warn')}${tile('In booking', ['Booking form', 'KYC', 'Payment', 'Signatures'].reduce((a, k) => a + (s.stages[k] || 0), 0), 'doc', 'cu')}${tile('Booked this month', s.bookedThisMonth, 'star', 'ok')}${tile('Value booked (month)', inrShort(s.valueThisMonth), 'rupee')}</div>
+        <div class="stack gap-6"><span class="over" style="color:#C9CBE6">My status</span><div class="status-pick" id="st">${state.statuses.map((x) => `<button data-s="${x}" class="${u.status === x ? 'on' : ''}"><span class="dot ${slugS(x)}"></span>${x}</button>`).join('')}</div></div></div>
+      <div class="g g4 mt-16">${tile('New today', s.today, 'bolt', 'warn')}${tile(`Follow-ups due${s.followupsOverdue ? ` · <span style="color:var(--bad)">${s.followupsOverdue} overdue</span>` : ''}`, s.followupsDue, 'cal', 'aq')}${tile('In booking', ['Booking form', 'KYC', 'Payment', 'Signatures'].reduce((a, k) => a + (s.stages[k] || 0), 0), 'doc', 'cu')}${tile(`Booked this month · ${inrShort(s.valueThisMonth)}`, s.bookedThisMonth, 'star', 'ok')}</div>
       <div class="g mt-16 split">
         <div class="card"><div class="card-h"><h3>Next actions</h3><a class="btn ghost sm" href="#customers">All customers ${ic('arrow', 16)}</a></div><div class="card-b">
           ${active.length ? `<div class="list">${active.slice(0, 8).map((e) => `<div class="li go" data-c="${e.id}">${avatar(e.name)}<div class="grow"><b>${esc(e.name)}</b><div class="xs muted">${esc(e.project_name)} · ${esc(e.config)} · ${when(e.updated_at)}</div></div><div class="stack" style="align-items:flex-end;gap:4px">${badge(e.stage)}<span class="xs b hide-m" style="color:var(--cu-d)">${NEXT[e.stage]} →</span></div></div>`).join('')}</div>`
             : `<div class="empty">${ic('users')}<div class="b">No active customers</div><div class="sm">New walk-ins assigned to you appear here instantly.</div></div>`}</div></div>
-        <div class="card"><div class="card-h"><h3>My pipeline</h3></div><div class="card-b">${funnel(s.stages)}</div></div>
+        <div class="stack gap-14"><div class="card"><div class="card-h"><h3>Follow-ups due</h3><a class="btn ghost sm" href="#followups">All ${ic('arrow', 16)}</a></div><div class="card-b">${dueF.length ? `<div class="list">${dueF.slice(0, 6).map(fuRow).join('')}</div>` : `<div class="empty" style="padding:20px">${ic('cal')}<div class="sm">Nothing due today</div></div>`}</div></div>
+        <div class="card"><div class="card-h"><h3>My pipeline</h3></div><div class="card-b">${funnel(s.stages)}</div></div></div>
       </div></div>`;
     qsa('[data-c]').forEach((el) => (el.onclick = () => go('c-' + el.dataset.c)));
+    bindFu($('view'), dueF, () => guard(viewHome()));
     qsa('#st button').forEach((b) => (b.onclick = run(async () => { const j = await api('/api/me', { method: 'PATCH', json: { status: b.dataset.s } }); state.user = j.user; qsa('#st button').forEach((x) => x.classList.toggle('on', x === b)); toast('Status: ' + b.dataset.s); })));
   }
   function funnel(stages) {
@@ -230,7 +238,8 @@
   async function viewBoard() {
     loading();
     const draw = async () => {
-      const [b, s] = await Promise.all([api('/api/board'), api('/api/stats')]);
+      const [b, s, an] = await Promise.all([api('/api/board'), api('/api/stats'), api('/api/analytics?days=' + state.days)]);
+      const T = an.totals; const conv = T.leads ? Math.round((T.booked / T.leads) * 1000) / 10 : 0;
       const st = b.stats;
       $('view').innerHTML = `<div class="fade-in">${pageHead('Dashboard', `${new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })} · updates live`, `<button class="btn cu" id="nw3">${ic('plus')} New walk-in</button>`)}
         <div class="g g4">${tile('Walk-ins today', st.walkins, 'users')}${tile('Waiting to be met', st.waiting, 'clock', 'warn')}${tile('Booked today', st.booked, 'star', 'ok')}${tile('Sales team free', `${st.free}<span class="muted" style="font-size:18px"> / ${st.team}</span>`, 'team', 'cu')}</div>
@@ -247,7 +256,21 @@
           <div class="stack gap-14"><div class="card"><div class="card-h"><h3>Sales team</h3></div><div class="card-b"><div class="list">${b.team.map((x) => `<div class="li">${avatar(x.name, x.photoUrl)}<div class="grow"><b class="sm">${esc(x.name)}</b><div class="xs muted">${x.today} today · ${x.projects.map((p) => esc(p.name)).join(', ')}</div></div>
               <select data-st="${x.id}" style="height:34px;width:auto;font-size:12.5px;padding-left:10px">${state.statuses.map((v) => `<option ${v === x.status ? 'selected' : ''}>${v}</option>`).join('')}</select></div>`).join('')}</div></div></div>
             <div class="card"><div class="card-h"><h3>Pipeline</h3></div><div class="card-b">${funnel(s.stages)}</div></div></div>
-        </div></div>`;
+        </div>
+        <div class="row spread mt-24 mb-16"><div><h2>Performance</h2><p class="sm muted">Leads, conversion, follow-ups and quotations</p></div>
+          <div class="seg" id="per">${[7, 30, 90, 365].map((d) => `<button data-d="${d}" class="${state.days === d ? 'on' : ''}">${d === 365 ? '1 yr' : d + ' days'}</button>`).join('')}</div></div>
+        <div class="g g4">${tile('Leads', T.leads, 'users', 'aq')}${tile(`Conversion · ${T.booked} booked`, conv + '%', 'trend', 'ok')}${tile(`Quotations · ${inrShort(an.quotes.v)}`, an.quotes.n, 'quote', 'cu')}${tile(`Follow-ups overdue · ${an.followups.today} due today`, `<span style="${an.followups.overdue ? 'color:var(--bad)' : ''}">${an.followups.overdue}</span>`, 'cal', 'warn')}</div>
+        <div class="g mt-16 split">
+          <div class="card"><div class="card-h"><h3>Team performance</h3><span class="xs muted">last ${an.days} days</span></div>
+            <div class="tscroll"><table class="tbl"><thead><tr><th>Sales person</th><th>Leads</th><th>Active</th><th>Booked</th><th>Conv.</th><th>Overdue</th></tr></thead><tbody>
+            ${an.byPerson.map((p) => `<tr><td><div class="person">${avatar(p.name, p.photoUrl)}<div><b class="sm">${esc(p.name)}</b><div class="xs muted"><span class="dot ${slugS(p.status)}"></span> ${esc(p.status)}</div></div></div></td><td class="num b">${p.leads}</td><td class="num">${p.active}</td><td class="num b" style="color:var(--ok)">${p.booked}</td>
+              <td class="num">${p.leads ? Math.round((p.booked / p.leads) * 100) : 0}%</td><td class="num">${p.overdue ? `<span class="badge bad">${p.overdue}</span>` : '<span class="faint">0</span>'}</td></tr>`).join('')}</tbody></table></div></div>
+          <div class="card"><div class="card-h"><h3>Walk-ins · last 14 days</h3></div><div class="card-b">${dailyBars(an.daily)}</div></div></div>
+        <div class="g g2 mt-16">
+          <div class="card"><div class="card-h"><h3>Lead sources</h3></div><div class="card-b">${hbars(an.bySource)}</div></div>
+          <div class="card"><div class="card-h"><h3>Projects</h3></div><div class="card-b">${hbars(an.byProject)}</div></div></div>
+        </div>`;
+      qsa('#per button').forEach((bn) => (bn.onclick = () => { state.days = Number(bn.dataset.d); guard(draw()); }));
       $('nw3').onclick = () => $('newWalk').click();
       qsa('tr[data-c]').forEach((tr) => (tr.onclick = (ev) => { if (!ev.target.closest('[data-stop]')) go('c-' + tr.dataset.c); }));
       qsa('[data-st]').forEach((sel) => (sel.onchange = run(async () => { await api(`/api/team/${sel.dataset.st}/status`, { method: 'PATCH', json: { status: sel.value } }); toast('Status updated'); })));
@@ -255,6 +278,17 @@
     };
     await draw();
     boardTimer = setInterval(() => { if (!$('modal') && location.hash.slice(1) === 'board') guard(draw()); }, 20000);
+  }
+  function hbars(rows) {
+    if (!rows.length) return '<div class="empty sm" style="padding:16px">No data for this period</div>';
+    const max = Math.max(1, ...rows.map((r) => r.n));
+    return `<div class="funnel">${rows.map((r) => `<div class="fb" style="grid-template-columns:minmax(90px,140px) 1fr 64px"><span class="sm" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.k)}</span><span class="bar"><i style="width:${(r.n / max) * 100}%"></i></span><span class="num sm" style="text-align:right">${r.n}${r.booked ? ` <span style="color:var(--ok)">· ${r.booked}</span>` : ''}</span></div>`).join('')}</div><p class="xs muted mt-12">Leads · <span style="color:var(--ok)">booked</span></p>`;
+  }
+  function dailyBars(rows) {
+    const m = Object.fromEntries(rows.map((r) => [r.d, r.n])); const days = [];
+    for (let i = 13; i >= 0; i--) { const d = new Date(Date.now() - i * 864e5); const k = new Date(d.getTime() + 330 * 60000).toISOString().slice(0, 10); days.push([k, m[k] || 0, d]); }
+    const max = Math.max(1, ...days.map((d) => d[1]));
+    return `<div class="dbars">${days.map(([k, n, d]) => `<div title="${k}: ${n}"><span class="num">${n || ''}</span><i style="height:${Math.max(3, (n / max) * 100)}%"></i><small>${d.getDate()}</small></div>`).join('')}</div>`;
   }
   const alertLink = (e, x) => (x ? `https://wa.me/${x.phone}?text=${encodeURIComponent(`🔔 New walk-in assigned to you\n${e.id}\n👤 ${e.name}\n📱 +91 ${e.mobile}\n🏢 ${e.project_name} · ${e.config}\n💰 ${e.budget}\n📣 ${e.source}${e.cp_name ? ' (' + e.cp_name + ')' : ''}\nCustomer is at reception.`)}` : '#');
 
@@ -265,38 +299,79 @@
     onOpen: (m) => { $('ok').onclick = run(async () => { await api(`/api/enquiries/${id}/reassign`, { json: { userId, reason: $('rr').value } }); closeModal(); toast('Assigned'); after && after(); }); qsa('[data-close]', m).forEach((b) => (b.onclick = () => { closeModal(); after && after(); })); } });
   }
 
-  /* ======================= CUSTOMERS ======================= */
+  /* ======================= CUSTOMERS (records) ======================= */
+  const PERIODS = [['', 'All time'], ['1', 'Today'], ['7', '7 days'], ['30', '30 days'], ['90', '90 days']];
+  const COLS = [
+    ['id', 'ID'], ['name', 'Customer'], ['project_name', 'Interest'], ['budget', 'Budget'], ['source', 'Source'],
+    ['assigned_name', 'Owner'], ['stage', 'Stage'], ['next_followup', 'Next follow-up'], ['last_activity', 'Last activity'], ['created_at', 'Created'],
+  ];
   async function viewCustomers() {
     const mine = state.user.role === 'sales';
-    const v = state.view;
-    $('view').innerHTML = `<div class="fade-in">${pageHead(mine ? 'My customers' : 'Customers', 'Every enquiry and where it stands.',
-      `<div class="seg" id="mode"><button data-m="list" class="${v.mode === 'list' ? 'on' : ''}">${ic('list', 16)} List</button><button data-m="board" class="${v.mode === 'board' ? 'on' : ''}">${ic('cols', 16)} Pipeline</button></div>`)}
-      <div class="row mb-16"><div class="search grow" style="max-width:380px">${ic('search')}<input type="text" id="q" placeholder="Search name, mobile or ID" value="${esc(v.q)}"></div></div>
+    const v = state.view; if (!v.mode) v.mode = mine || window.innerWidth < 980 ? 'list' : 'table';
+    $('view').innerHTML = `<div class="fade-in">${pageHead(mine ? 'My customers' : 'Customer records', 'Every enquiry, its owner, stage and next follow-up.',
+      `<button class="btn line sm" id="csv">${ic('download', 16)} Export CSV</button><div class="seg" id="mode"><button data-m="table" class="hide-m ${v.mode === 'table' ? 'on' : ''}">${ic('list', 16)} Table</button><button data-m="list" class="${v.mode === 'list' ? 'on' : ''}">${ic('users', 16)} Cards</button><button data-m="board" class="${v.mode === 'board' ? 'on' : ''}">${ic('cols', 16)} Pipeline</button></div>`)}
+      <div class="card p mb-16" style="padding:14px"><div class="row">
+        <div class="search grow" style="min-width:200px">${ic('search')}<input type="text" id="q" placeholder="Search name, mobile or ID" value="${esc(v.q)}"></div>
+        <select id="fP" style="width:auto;min-width:150px"><option value="">All projects</option></select>
+        ${mine ? '' : '<select id="fO" style="width:auto;min-width:140px"><option value="">All owners</option></select>'}
+        <select id="fS" style="width:auto;min-width:140px"><option value="">All sources</option></select>
+        <select id="fD" style="width:auto">${PERIODS.map(([k, l]) => `<option value="${k}" ${v.period === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        <button class="btn ghost sm" id="fX">Clear</button></div></div>
       <div class="chips mb-16" id="stg"></div><div id="cl">${skel(3, 90)}</div></div>`;
     let all = [];
+    const filtered = () => {
+      const cut = v.period ? Date.now() - Number(v.period) * 864e5 : 0;
+      return all.filter((e) => (!v.stage || e.stage === v.stage) && (!v.project || e.project_name === v.project) && (!v.owner || (e.assigned_name || 'Unassigned') === v.owner)
+        && (!v.source || e.source === v.source) && (!cut || new Date(e.created_at) >= (v.period === '1' ? new Date(new Date().setHours(0, 0, 0, 0)) : cut)));
+    };
+    const fill = (id, vals, cur) => { const el = $(id); if (!el) return; const first = el.options[0].outerHTML; el.innerHTML = first + [...new Set(vals)].filter(Boolean).sort().map((x) => `<option ${x === cur ? 'selected' : ''}>${esc(x)}</option>`).join(''); };
     const drawChips = () => {
-      const counts = {}; all.forEach((e) => (counts[e.stage] = (counts[e.stage] || 0) + 1));
-      $('stg').innerHTML = [['', 'All', all.length], ...state.stages.filter((s) => counts[s]).map((s) => [s, s, counts[s]])].map(([k, l, n]) => `<button class="chip ${v.stage === k ? 'on' : ''}" data-k="${k}">${l}<span class="n">${n}</span></button>`).join('');
+      const base = filtered().length; const prev = v.stage; v.stage = ''; const rows = filtered(); v.stage = prev;
+      const counts = {}; rows.forEach((e) => (counts[e.stage] = (counts[e.stage] || 0) + 1));
+      $('stg').innerHTML = [['', 'All', rows.length], ...state.stages.filter((x) => counts[x]).map((x) => [x, x, counts[x]])].map(([k, l, n]) => `<button class="chip ${v.stage === k ? 'on' : ''}" data-k="${k}">${l}<span class="n">${n}</span></button>`).join('') + `<span class="xs muted" style="align-self:center;margin-left:auto">${base} shown</span>`;
       qsa('#stg .chip').forEach((c) => (c.onclick = () => { v.stage = c.dataset.k; drawChips(); drawList(); }));
       $('stg').classList.toggle('hide', v.mode === 'board');
     };
+    const fuCell = (d) => { if (!d) return '<span class="faint">—</span>'; const t = new Date(d); const cls = t < Date.now() ? 'over' : t < endOfToday() ? 'today' : 'later'; return `<span class="due ${cls}">${cls === 'over' ? 'Overdue · ' : ''}${when(d)}</span>`; };
     const drawList = () => {
-      const rows = all.filter((e) => !v.stage || e.stage === v.stage);
+      let rows = filtered();
       if (v.mode === 'board') {
-        const cols = state.stages.filter((s) => s !== 'Lost');
-        $('cl').innerHTML = `<div class="kanban">${cols.map((s) => { const items = all.filter((e) => e.stage === s); return `<div class="col"><div class="col-h"><span>${s}</span><span class="badge plain">${items.length}</span></div>
-          ${items.map((e) => `<div class="kc" data-c="${e.id}"><div class="row spread"><b>${esc(e.name)}</b><span class="xs faint">${e.id}</span></div><div class="xs muted mt-8">${esc(e.project_name)} · ${esc(e.config)}</div><div class="row spread mt-8"><span class="xs b" style="color:var(--cu-d)">${esc(e.budget)}</span>${mine ? '' : `<span class="xs muted">${esc(first(e.assigned_name) || '—')}</span>`}</div></div>`).join('') || '<div class="xs faint" style="padding:8px">—</div>'}</div>`; }).join('')}</div>`;
+        const cols = state.stages.filter((x) => x !== 'Lost');
+        $('cl').innerHTML = `<div class="kanban">${cols.map((x) => { const items = rows.filter((e) => e.stage === x); return `<div class="col"><div class="col-h"><span>${x}</span><span class="badge plain">${items.length}</span></div>
+          ${items.map((e) => `<div class="kc" data-c="${e.id}"><div class="row spread"><b>${esc(e.name)}</b><span class="xs faint">${e.id}</span></div><div class="xs muted mt-8">${esc(e.project_name)} · ${esc(e.config)}</div><div class="row spread mt-8"><span class="xs b" style="color:var(--cu-d)">${esc(e.budget)}</span>${mine ? '' : `<span class="xs muted">${esc(first(e.assigned_name) || '—')}</span>`}</div>${e.next_followup ? `<div class="mt-8">${fuCell(e.next_followup)}</div>` : ''}</div>`).join('') || '<div class="xs faint" style="padding:8px">—</div>'}</div>`; }).join('')}</div>`;
+      } else if (v.mode === 'table') {
+        const k = v.sort; rows = rows.slice().sort((a, b) => { const x = a[k] ?? ''; const y = b[k] ?? ''; return (x > y ? 1 : x < y ? -1 : 0) * v.dir; });
+        $('cl').innerHTML = rows.length ? `<div class="card"><div class="tscroll"><table class="tbl"><thead><tr>${COLS.filter(([c]) => !(mine && c === 'assigned_name')).map(([c, l]) => `<th class="sort ${v.sort === c ? 'on' : ''}" data-s="${c}">${l}${v.sort === c ? (v.dir > 0 ? ' ↑' : ' ↓') : ''}</th>`).join('')}</tr></thead><tbody>
+          ${rows.map((e) => `<tr class="go" data-c="${e.id}"><td class="xs muted nowrap">${e.id}</td><td><div class="person">${avatar(e.name)}<div style="min-width:0"><b class="sm">${esc(e.name)}</b><div class="xs muted nowrap">${ph(e.mobile)}</div></div></div></td>
+            <td class="nowrap"><span class="sm b">${esc(e.project_name)}</span><div class="xs muted">${esc(e.config)}</div></td><td class="sm nowrap">${esc(e.budget)}</td><td class="sm">${esc(e.source)}</td>
+            ${mine ? '' : `<td class="sm nowrap">${esc(e.assigned_name || 'Unassigned')}</td>`}<td>${badge(e.stage)}</td><td class="nowrap">${fuCell(e.next_followup)}</td><td class="xs muted nowrap">${when(e.last_activity || e.updated_at)}</td><td class="xs muted nowrap">${day(e.created_at)}</td></tr>`).join('')}</tbody></table></div></div>`
+          : `<div class="card"><div class="empty">${ic('users')}<div class="b">No customers match</div><div class="sm">Try clearing the filters.</div></div></div>`;
+        qsa('th[data-s]').forEach((th) => (th.onclick = () => { if (v.sort === th.dataset.s) v.dir *= -1; else { v.sort = th.dataset.s; v.dir = 1; } drawList(); }));
       } else {
         $('cl').innerHTML = rows.length ? `<div class="card">${rows.map((e) => `<div class="li go" style="margin:0;border-radius:0;padding:14px 18px;border-bottom:1px solid var(--line-2)" data-c="${e.id}">${avatar(e.name)}
-            <div class="grow"><div class="row gap-6"><b>${esc(e.name)}</b><span class="xs faint">${e.id}</span></div><div class="xs muted">${esc(e.project_name)} · ${esc(e.config)} · ${esc(e.budget)}${mine ? '' : ' · ' + esc(e.assigned_name || 'Unassigned')}</div></div>
-            <div class="stack" style="align-items:flex-end;gap:3px">${badge(e.stage)}<span class="xs muted hide-m">${when(e.updated_at)}</span></div></div>`).join('')}</div>`
-          : `<div class="card"><div class="empty">${ic('users')}<div class="b">No customers here</div><div class="sm">Try another filter or search.</div></div></div>`;
+            <div class="grow"><div class="row gap-6"><b>${esc(e.name)}</b><span class="xs faint">${e.id}</span></div><div class="xs muted">${esc(e.project_name)} · ${esc(e.config)} · ${esc(e.budget)}${mine ? '' : ' · ' + esc(e.assigned_name || 'Unassigned')}</div>${e.next_followup ? `<div class="mt-8">${fuCell(e.next_followup)}</div>` : ''}</div>
+            <div class="stack" style="align-items:flex-end;gap:3px">${badge(e.stage)}<span class="xs muted hide-m">${when(e.last_activity || e.updated_at)}</span></div></div>`).join('')}</div>`
+          : `<div class="card"><div class="empty">${ic('users')}<div class="b">No customers match</div><div class="sm">Try clearing the filters.</div></div></div>`;
       }
       qsa('[data-c]', $('cl')).forEach((el) => (el.onclick = () => go('c-' + el.dataset.c)));
     };
-    const load = run(async () => { all = (await api('/api/enquiries?' + new URLSearchParams({ q: v.q }))).enquiries; drawChips(); drawList(); });
+    const redraw = () => { drawChips(); drawList(); };
+    const load = run(async () => {
+      all = (await api('/api/enquiries?' + new URLSearchParams({ q: v.q }))).enquiries;
+      fill('fP', all.map((e) => e.project_name), v.project); fill('fO', all.map((e) => e.assigned_name || 'Unassigned'), v.owner); fill('fS', all.map((e) => e.source), v.source);
+      redraw();
+    });
     let t; $('q').oninput = () => { v.q = $('q').value; clearTimeout(t); t = setTimeout(load, 220); };
-    qsa('#mode button').forEach((b) => (b.onclick = () => { v.mode = b.dataset.m; qsa('#mode button').forEach((x) => x.classList.toggle('on', x === b)); drawChips(); drawList(); }));
+    [['fP', 'project'], ['fO', 'owner'], ['fS', 'source'], ['fD', 'period']].forEach(([id, k]) => { if ($(id)) $(id).onchange = () => { v[k] = $(id).value; redraw(); }; });
+    $('fX').onclick = () => { Object.assign(v, { q: '', project: '', owner: '', source: '', period: '', stage: '' }); viewCustomers(); };
+    qsa('#mode button').forEach((b) => (b.onclick = () => { v.mode = b.dataset.m; qsa('#mode button').forEach((x) => x.classList.toggle('on', x === b)); redraw(); }));
+    $('csv').onclick = () => {
+      const rows = filtered(); const head = ['ID', 'Name', 'Mobile', 'Email', 'Project', 'Configuration', 'Budget', 'Purpose', 'Source', 'Channel partner', 'Owner', 'Stage', 'Next follow-up', 'Created'];
+      const q = (x) => `"${String(x ?? '').replace(/"/g, '""')}"`;
+      const csv = [head, ...rows.map((e) => [e.id, e.name, e.mobile, e.email, e.project_name, e.config, e.budget, e.purpose, e.source, e.cp_name, e.assigned_name, e.stage, e.next_followup ? new Date(e.next_followup).toLocaleString('en-IN') : '', new Date(e.created_at).toLocaleString('en-IN')])].map((r) => r.map(q).join(',')).join('\n');
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' })); a.download = `mihir-customers-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+      toast(`${rows.length} customers exported`);
+    };
     load();
   }
 
@@ -344,13 +419,15 @@
           <a class="btn wa sm" target="_blank" rel="noopener" href="https://wa.me/91${esc(e.mobile)}?text=${encodeURIComponent('Hi ' + first(e.name) + ', this is ' + (e.assigned_name || state.user.name) + ' from ' + state.org.name + '.')}">${ic('wa', 16)} WhatsApp</a>
           <a class="btn line sm" target="_blank" rel="noopener" href="/api/enquiries/${e.id}/enquiry.pdf">${ic('print', 16)} Enquiry form</a>
           ${e.booking ? `<a class="btn line sm" target="_blank" rel="noopener" href="/api/enquiries/${e.id}/${sig.developer ? 'booking' : 'application'}.pdf">${ic('doc', 16)} Application</a>` : ''}
+          ${!['Lost'].includes(e.stage) ? `<button class="btn line sm" id="bFu">${ic('cal', 16)} Follow-up</button>` : ''}
+          ${can.sell() && !['Booked', 'Lost'].includes(e.stage) ? `<button class="btn line sm" id="bQt">${ic('quote', 16)} Quotation</button>` : ''}
           ${can.desk() && !['Booked', 'Lost'].includes(e.stage) ? '<button class="btn line sm" id="bRe">Reassign</button>' : ''}
           ${can.sell() && !['Booked', 'Lost'].includes(e.stage) ? '<button class="btn danger sm" id="bLost">Mark lost</button>' : ''}</div></div>
         ${e.stage === 'Lost' ? '<div class="banner warn mt-16">This enquiry was marked lost.</div>' : `<div class="track">${S.filter((s) => s !== 'Lost').map((s, i) => `<span class="${i < pct ? 'done' : i === pct ? 'cur' : ''}" title="${s}"></span>`).join('')}</div>`}</div>
       <div class="journey">
         <div class="card steps">${JSTEPS.map((st, i) => { const s = status(st); return `<div class="step ${s} ${selStep === st.k ? 'sel' : ''}" data-s="${st.k}"><span class="n">${s === 'done' ? ic('check', 16) : s === 'lock' ? ic('lock', 14) : i + 1}</span><div><b>${st.t}</b><small>${s === 'done' ? 'Completed' : s === 'cur' ? 'Next up' : 'Locked'}</small></div></div>`; }).join('')}</div>
         <div class="stack gap-14"><div class="card p" id="panel"></div>
-          <div class="card"><div class="card-h"><div class="seg" id="tabs"><button class="on" data-t="act">Activity</button><button data-t="det">Details</button><button data-t="sync">CRM sync</button></div></div><div class="card-b" id="tabb"></div></div></div>
+          <div class="card"><div class="card-h"><div class="seg" id="tabs" style="overflow-x:auto;max-width:100%"><button class="on" data-t="act">Activity</button><button data-t="fu">Follow-ups${e.followups.filter((f) => !f.done_at).length ? ` <span class="badge cu" style="padding:0 7px">${e.followups.filter((f) => !f.done_at).length}</span>` : ''}</button><button data-t="qt">Quotes${e.quotations.length ? ` <span class="badge plain" style="padding:0 7px">${e.quotations.length}</span>` : ''}</button><button data-t="det">Details</button><button data-t="sync">CRM</button></div></div><div class="card-b" id="tabb"></div></div></div>
       </div></div>`;
 
     const re = () => guard(viewCustomer(id, true));
@@ -367,7 +444,23 @@
       <div class="field"><label>Note (optional)</label><input type="text" id="ln"></div><div class="row" style="justify-content:flex-end"><button class="btn line" data-close>Cancel</button><button class="btn danger" id="ok">Mark lost</button></div>`,
     onOpen: () => { let r = ''; qsa('#lr .chip').forEach((c) => (c.onclick = () => { r = c.dataset.v; qsa('#lr .chip').forEach((x) => x.classList.toggle('on', x === c)); })); $('ok').onclick = run(async () => { await post('lost', { reason: [r, $('ln').value].filter(Boolean).join(' — ') }); closeModal(); toast('Marked lost'); re(); }); } });
 
+    if ($('bFu')) $('bFu').onclick = () => openFollowup(e, re);
+    if ($('bQt')) $('bQt').onclick = run(() => openQuote(e, re));
     const drawTab = (t) => {
+      if (t === 'fu') {
+        $('tabb').innerHTML = `<div class="row spread mb-12"><span class="sm muted">Scheduled calls, visits and meetings</span><button class="btn sm" id="fuAdd">${ic('plus', 15)} Schedule</button></div>
+          ${e.followups.length ? `<div class="list">${e.followups.map((f) => fuRow({ ...f, name: e.name, mobile: e.mobile }, true)).join('')}</div>` : `<div class="empty" style="padding:24px">${ic('cal')}<div class="sm">No follow-ups yet</div></div>`}`;
+        $('fuAdd').onclick = () => openFollowup(e, re); bindFu($('tabb'), e.followups.map((f) => ({ ...f, name: e.name, mobile: e.mobile, enquiry_id: e.id })), re);
+        return;
+      }
+      if (t === 'qt') {
+        $('tabb').innerHTML = `<div class="row spread mb-12"><span class="sm muted">Cost sheets shared with the customer</span>${can.sell() && e.stage !== 'Lost' ? `<button class="btn sm" id="qtAdd">${ic('plus', 15)} New quotation</button>` : ''}</div>
+          ${e.quotations.length ? `<div class="list">${e.quotations.map((q) => `<div class="li"><span class="avatar" style="border-radius:10px;background:var(--aqua-p);color:var(--aqua-d)">${ic('quote', 18)}</span><div class="grow"><b class="sm">${q.id} · ${inr(Math.round(q.total))}</b><div class="xs muted">${esc(q.unit_label || 'Unit not chosen')} · ${when(q.created_at)} · ${esc(q.created_name || '')} · ${new Date(q.valid_until) < new Date() ? '<span style="color:var(--bad)">expired</span>' : 'valid till ' + day(q.valid_until)}</div></div>
+            <a class="btn ghost sm icon" target="_blank" rel="noopener" href="/api/quotations/${q.id}.pdf" title="Open PDF">${ic('eye', 16)}</a><button class="btn wa sm icon" data-qs="${q.id}" title="Send on WhatsApp">${ic('wa', 16)}</button></div>`).join('')}</div>` : `<div class="empty" style="padding:24px">${ic('quote')}<div class="sm">No quotations yet</div></div>`}`;
+        if ($('qtAdd')) $('qtAdd').onclick = run(() => openQuote(e, re));
+        qsa('[data-qs]', $('tabb')).forEach((bn) => (bn.onclick = run(async () => { const { url } = await api(`/api/quotations/${bn.dataset.qs}/link`); window.open(quoteWa(e, bn.dataset.qs, url), '_blank', 'noopener'); })));
+        return;
+      }
       $('tabb').innerHTML = t === 'act' ? `${can.sell() || can.desk() ? `<div class="row mb-16"><input type="text" id="note" placeholder="Add a note or follow-up…" style="flex:1;min-width:180px"><button class="btn sm" id="bNote">Add</button></div>` : ''}
           <ul class="feed">${e.activities.map((a) => `<li><span class="d"></span><div><div class="sm b">${esc(a.note || a.type)}</div><div class="xs muted">${when(a.at)} · ${esc(a.user_name || 'System')}</div></div></li>`).join('')}</ul>`
         : t === 'det' ? `<dl class="kv"><dt>Mobile</dt><dd>${ph(e.mobile)} ${e.wa_linked_at ? '<span class="badge ok">on WhatsApp</span>' : ''}</dd><dt>Email</dt><dd>${esc(e.email || '—')}</dd><dt>Residence</dt><dd>${esc(e.residence || '—')}</dd>
@@ -594,6 +687,125 @@
     if ($('wSubmit')) $('wSubmit').onclick = run(() => save(true));
   }
 
+  /* ======================= FOLLOW-UPS ======================= */
+  const endOfToday = () => { const d = new Date(); d.setHours(23, 59, 59, 999); return d; };
+  const FU_KINDS = [['Call', 'phone'], ['WhatsApp', 'wa'], ['Site visit', 'home2'], ['Meeting', 'users'], ['Email', 'doc']];
+  const fuIcon = (k) => (FU_KINDS.find((x) => x[0] === k) || FU_KINDS[0])[1];
+  const dueLabel = (d) => { const t = new Date(d); const cls = t < Date.now() ? 'over' : t < endOfToday() ? 'today' : 'later'; return `<span class="due ${cls}">${cls === 'over' ? 'Overdue · ' : cls === 'today' ? 'Today · ' : ''}${when(d)}</span>`; };
+  function fuRow(f, inCustomer) {
+    const done = !!f.done_at;
+    return `<div class="li" style="align-items:flex-start;${done ? 'opacity:.6' : ''}"><span class="avatar" style="border-radius:10px;background:${done ? 'var(--ok-t)' : 'var(--aqua-p)'};color:${done ? 'var(--ok)' : 'var(--aqua-d)'}">${ic(done ? 'check' : fuIcon(f.kind), 18)}</span>
+      <div class="grow" style="min-width:0">${inCustomer ? '' : `<a class="b sm" href="#c-${f.enquiry_id}" style="color:var(--ink);text-decoration:none">${esc(f.name)}</a> <span class="xs faint">${f.enquiry_id}</span>`}
+        <div class="${inCustomer ? 'sm b' : 'xs muted'}">${esc(f.kind)}${f.note ? ' — ' + esc(f.note) : ''}${!inCustomer && f.project_name ? ` · ${esc(f.project_name)}` : ''}${!inCustomer && f.assigned_name && state.user.role !== 'sales' ? ` · ${esc(f.assigned_name)}` : ''}</div>
+        <div class="mt-8">${done ? `<span class="due later">Done ${when(f.done_at)}${f.outcome ? ' — ' + esc(f.outcome) : ''}</span>` : dueLabel(f.due_at)}</div></div>
+      ${done ? '' : `<div class="row gap-6" style="flex-wrap:nowrap">${f.kind === 'WhatsApp' ? `<a class="btn wa sm icon" target="_blank" rel="noopener" href="https://wa.me/91${esc(f.mobile)}">${ic('wa', 15)}</a>` : `<a class="btn line sm icon" href="tel:+91${esc(f.mobile)}">${ic('phone', 15)}</a>`}<button class="btn sm" data-fd="${f.id}">${ic('check', 15)}<span class="hide-m">Done</span></button></div>`}</div>`;
+  }
+  function bindFu(root, list, after) {
+    qsa('[data-fd]', root).forEach((bn) => (bn.onclick = (ev) => { ev.stopPropagation(); const f = list.find((x) => String(x.id) === bn.dataset.fd); doneFollowup(f, after); }));
+  }
+  const localDT = (d) => { const z = new Date(d.getTime() - d.getTimezoneOffset() * 60000); return z.toISOString().slice(0, 16); };
+  function openFollowup(e, after) {
+    const t = new Date(); t.setDate(t.getDate() + 1); t.setHours(11, 0, 0, 0);
+    let kind = 'Call';
+    modal({ title: 'Schedule a follow-up', sub: `${esc(e.name)} · ${e.id}`, body: `
+      <div class="lbl mb-12">Type</div><div class="chips mb-16" id="fk">${FU_KINDS.map(([k, i]) => `<button class="chip ${k === kind ? 'on' : ''}" data-k="${k}">${ic(i, 15)}${k}</button>`).join('')}</div>
+      <div class="field"><label>When <span class="req">*</span></label><input type="datetime-local" id="fw" value="${localDT(t)}"></div>
+      <div class="chips mb-16" id="fq">${[['In 2 hours', 2 / 24], ['Tomorrow', 1], ['In 3 days', 3], ['Next week', 7]].map(([l, d]) => `<button class="chip" data-d="${d}">${l}</button>`).join('')}</div>
+      <div class="field"><label>Note</label><input type="text" id="fn" placeholder="e.g. Share 3 BHK floor plan, discuss loan"></div>
+      <div class="row" style="justify-content:flex-end"><button class="btn line" data-close>Cancel</button><button class="btn" id="fok">${ic('cal', 16)} Schedule</button></div>`,
+    onOpen: () => {
+      qsa('#fk .chip').forEach((c) => (c.onclick = () => { kind = c.dataset.k; qsa('#fk .chip').forEach((x) => x.classList.toggle('on', x === c)); }));
+      qsa('#fq .chip').forEach((c) => (c.onclick = () => { const d = Number(c.dataset.d); const x = new Date(); if (d < 1) x.setTime(x.getTime() + d * 864e5); else { x.setDate(x.getDate() + d); x.setHours(11, 0, 0, 0); } $('fw').value = localDT(x); qsa('#fq .chip').forEach((y) => y.classList.toggle('on', y === c)); }));
+      $('fok').onclick = run(async () => { if (!$('fw').value) throw new Error('Choose a date and time'); await api(`/api/enquiries/${e.id}/followups`, { json: { kind, dueAt: new Date($('fw').value).toISOString(), note: $('fn').value } }); closeModal(); toast('Follow-up scheduled'); refreshCounts(); after && after(); });
+    } });
+  }
+  function doneFollowup(f, after) {
+    modal({ title: 'Mark follow-up done', sub: `${esc(f.kind)} · ${esc(f.name || '')}`, body: `
+      <div class="chips mb-16" id="oc">${['Spoke — interested', 'Site visit fixed', 'Asked to call later', 'No answer', 'Not interested'].map((x) => `<button class="chip" data-v="${x}">${x}</button>`).join('')}</div>
+      <div class="field"><label>Outcome</label><input type="text" id="oo" placeholder="What happened?"></div>
+      <label class="check mb-16"><input type="checkbox" id="onext" checked><span class="sm">Schedule the next follow-up</span></label>
+      <div class="row" style="justify-content:flex-end"><button class="btn line" data-close>Cancel</button><button class="btn" id="ook">${ic('check', 16)} Done</button></div>`,
+    onOpen: () => {
+      qsa('#oc .chip').forEach((c) => (c.onclick = () => { $('oo').value = c.dataset.v; qsa('#oc .chip').forEach((x) => x.classList.toggle('on', x === c)); $('onext').checked = !/Not interested/.test(c.dataset.v); }));
+      $('ook').onclick = run(async () => { await api(`/api/followups/${f.id}/done`, { json: { outcome: $('oo').value } }); const next = $('onext').checked; closeModal(); toast('Follow-up completed'); refreshCounts();
+        if (next) openFollowup({ id: f.enquiry_id, name: f.name }, after); else after && after(); });
+    } });
+  }
+  async function viewFollowups() {
+    loading();
+    const mineOnly = state.user.role === 'sales';
+    const [open, done] = await Promise.all([api('/api/followups'), api('/api/followups?status=done')]);
+    const eod = endOfToday();
+    const groups = { over: open.followups.filter((f) => new Date(f.due_at) < Date.now()), today: open.followups.filter((f) => new Date(f.due_at) >= Date.now() && new Date(f.due_at) <= eod), later: open.followups.filter((f) => new Date(f.due_at) > eod), done: done.followups };
+    let tab = groups.over.length ? 'over' : 'today';
+    const draw = () => {
+      $('view').innerHTML = `<div class="fade-in">${pageHead('Follow-ups', mineOnly ? 'Your calls, visits and meetings — never miss a lead.' : 'Every scheduled follow-up across the team.')}
+        <div class="g g4 mb-16">${tile('Overdue', groups.over.length, 'alert', 'warn')}${tile('Due today', groups.today.length, 'cal', 'aq')}${tile('Upcoming', groups.later.length, 'clock')}${tile('Completed', groups.done.length, 'check', 'ok')}</div>
+        <div class="seg mb-16" id="ft">${[['over', 'Overdue'], ['today', 'Today'], ['later', 'Upcoming'], ['done', 'Done']].map(([k, l]) => `<button data-k="${k}" class="${tab === k ? 'on' : ''}">${l} <span class="xs muted">${groups[k].length}</span></button>`).join('')}</div>
+        <div class="card"><div class="card-b">${groups[tab].length ? `<div class="list">${groups[tab].map((f) => fuRow(f)).join('')}</div>` : `<div class="empty">${ic('cal')}<div class="b">${tab === 'over' ? 'No overdue follow-ups' : 'Nothing here'}</div><div class="sm">Schedule follow-ups from any customer page.</div></div>`}</div></div></div>`;
+      qsa('#ft button').forEach((b) => (b.onclick = () => { tab = b.dataset.k; draw(); }));
+      bindFu($('view'), groups[tab], () => guard(viewFollowups()));
+    };
+    draw();
+  }
+
+  /* ======================= QUOTATIONS ======================= */
+  const quoteWa = (e, id, url) => `https://wa.me/91${e.mobile}?text=${encodeURIComponent(`Hi ${first(e.name)}, here is your cost sheet (${id}) for ${e.project_name || 'your new home'} from ${state.org.name}: ${url}\nHappy to walk you through it — ${state.user.name}`)}`;
+  function qCompute(i) {
+    const n = (v) => { const x = Number(String(v ?? '').replace(/[^\d.]/g, '')); return Number.isFinite(x) ? x : 0; };
+    const carpet = n(i.carpet), floor = Math.floor(n(i.floor)), rate = n(i.rate);
+    const base = Math.round(carpet * rate), fr = Math.round(carpet * n(i.floorRise) * Math.max(0, floor - 1));
+    const ag = base + fr + n(i.plc) + n(i.parking);
+    const gst = Math.round(ag * n(i.gstPct) / 100), stamp = Math.round(ag * n(i.stampPct) / 100 / 100) * 100, reg = Math.min(Math.round(ag * n(i.regPct) / 100), n(i.regCap));
+    return { base, fr, ag, gst, stamp, reg, other: n(i.otherCharges), total: ag + gst + stamp + reg + n(i.otherCharges), book: Math.round(ag * 0.1) };
+  }
+  async function openQuote(e, after) {
+    const [{ defaults: D }, { units }] = await Promise.all([api('/api/quotation-defaults'), api(`/api/projects/${e.project_id}/units`)]);
+    const avail = units.filter((u) => u.status === 'Available' || u.held_by === e.id);
+    const f = (k, l, v, hint = '') => `<div class="field"><label>${l}</label><input type="text" inputmode="decimal" data-q="${k}" value="${esc(v)}">${hint ? `<span class="hint">${hint}</span>` : ''}</div>`;
+    modal({ title: 'New quotation', sub: `${esc(e.name)} · ${esc(e.project_name)} · ${esc(e.config)}`, wide: true, body: `
+      <div class="g split" style="gap:20px;align-items:start"><div>
+        <div class="field"><label>Unit</label><select id="qu"><option value="">— Not chosen yet (enter area) —</option>${avail.map((u) => `<option value="${u.id}" data-c="${u.carpet_area || ''}" data-f="${u.floor ?? ''}" ${e.booking && e.booking.flat_id === u.id ? 'selected' : ''}>${esc(u.tower)}${u.wing ? ' · ' + esc(u.wing) : ''} · ${esc(u.flat_no)} — ${esc(u.flat_type || '')} · ${u.carpet_area || '?'} sq ft · fl ${u.floor ?? '—'}</option>`).join('')}</select></div>
+        <div class="fgrid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">
+          ${f('carpet', 'Carpet area (sq ft) *', '')}${f('floor', 'Floor', '')}${f('rate', 'Rate ₹ / sq ft *', D.rate || '')}${f('floorRise', 'Floor rise ₹/sq ft/floor', D.floorRise)}
+          ${f('plc', 'PLC (₹)', D.plc)}${f('parking', 'Parking (₹)', D.parking)}${f('otherCharges', 'Other charges (₹)', D.otherCharges, 'Maintenance, legal, society')}
+          ${f('gstPct', 'GST %', D.gstPct)}${f('stampPct', 'Stamp duty %', D.stampPct, '5% + 1% metro cess')}${f('regPct', 'Registration %', D.regPct)}${f('validDays', 'Valid for (days)', D.validDays)}</div></div>
+        <div class="card enq" style="animation:none"><div class="card-b" id="qp"></div></div></div>
+      <div class="row mt-16" style="justify-content:flex-end"><button class="btn line" data-close>Cancel</button><button class="btn" id="qok">${ic('quote', 16)} Create quotation</button></div>`,
+    onOpen: (m) => {
+      const vals = () => { const o = { regCap: D.regCap }; qsa('[data-q]', m).forEach((i) => (o[i.dataset.q] = i.value)); return o; };
+      const prev = () => { const c = qCompute(vals()); $('qp').innerHTML = `<div class="over mb-12" style="color:var(--aqua-d)">Live cost sheet</div><dl class="kv" style="grid-template-columns:1fr auto">
+        <dt>Basic cost</dt><dd class="num">${inr(c.base)}</dd>${c.fr ? `<dt>Floor rise</dt><dd class="num">${inr(c.fr)}</dd>` : ''}<dt><b>Agreement value</b></dt><dd class="num">${inr(c.ag)}</dd>
+        <dt>GST</dt><dd class="num">${inr(c.gst)}</dd><dt>Stamp duty</dt><dd class="num">${inr(c.stamp)}</dd><dt>Registration</dt><dd class="num">${inr(c.reg)}</dd>${c.other ? `<dt>Other charges</dt><dd class="num">${inr(c.other)}</dd>` : ''}</dl>
+        <div class="total mt-16"><span class="sm">Total cost</span><b class="num">${inr(c.total)}</b></div><p class="xs muted mt-12">Booking amount (RERA max 10%): <b>${inr(c.book)}</b></p>`; };
+      const pick = () => { const o = $('qu').selectedOptions[0]; if (o && o.value) { qs('[data-q="carpet"]', m).value = o.dataset.c; qs('[data-q="floor"]', m).value = o.dataset.f; } prev(); };
+      $('qu').onchange = pick; qsa('[data-q]', m).forEach((i) => (i.oninput = prev)); pick();
+      $('qok').onclick = run(async () => {
+        const v = vals(); if (!Number(v.carpet) || !Number(v.rate)) throw new Error('Enter the carpet area and the rate per sq ft');
+        const bt = $('qok'); bt.disabled = true;
+        try { const r = await api(`/api/enquiries/${e.id}/quotations`, { json: { ...v, flatId: $('qu').value } }); closeModal(); shareQuote(e, r.id, r.url); after && after(); } finally { if ($('qok')) bt.disabled = false; }
+      });
+    } });
+  }
+  function shareQuote(e, id, url) {
+    modal({ title: `Quotation ${id} ready`, sub: 'Share the cost sheet with the customer.', body: `<div class="banner ok mb-16">${ic('check')}<span>Saved to ${esc(e.name)}'s record. The customer link works for 30 days.</span></div>
+      <div class="row"><a class="btn wa lg" target="_blank" rel="noopener" href="${quoteWa(e, id, url)}">${ic('wa', 18)} Send on WhatsApp</a><a class="btn line lg" target="_blank" rel="noopener" href="/api/quotations/${id}.pdf">${ic('eye', 18)} View PDF</a></div>` });
+  }
+  async function viewQuotations() {
+    loading();
+    const { quotations } = await api('/api/quotations');
+    const month = quotations.filter((q) => new Date(q.created_at) > Date.now() - 30 * 864e5);
+    $('view').innerHTML = `<div class="fade-in">${pageHead('Quotations', 'Cost sheets shared with customers. Create new ones from a customer page.')}
+      <div class="g g3 mb-16">${tile('Quotations (30 days)', month.length, 'quote', 'aq')}${tile('Value quoted (30 days)', inrShort(month.reduce((a, q) => a + Number(q.total), 0)), 'rupee', 'cu')}${tile('Still valid', quotations.filter((q) => new Date(q.valid_until) >= new Date(new Date().toDateString())).length, 'check', 'ok')}</div>
+      <div class="card">${quotations.length ? `<div class="tscroll"><table class="tbl"><thead><tr><th>Quote</th><th>Customer</th><th class="hide-m">Unit</th><th>Total</th><th class="hide-m">Validity</th><th class="hide-m">By</th><th></th></tr></thead><tbody>
+        ${quotations.map((q) => `<tr class="go" data-c="${q.enquiry_id}"><td class="nowrap"><b class="sm">${q.id}</b><div class="xs muted">${day(q.created_at)}</div></td><td><div class="person">${avatar(q.name)}<div style="min-width:0"><b class="sm">${esc(q.name)}</b><div class="xs muted">${esc(q.project_name)} · ${badge(q.stage)}</div></div></div></td>
+          <td class="sm hide-m">${esc(q.unit_label || '—')}</td><td class="nowrap num b">${inr(Math.round(q.total))}</td><td class="hide-m">${new Date(q.valid_until) < new Date(new Date().toDateString()) ? '<span class="badge bad">Expired</span>' : `<span class="badge ok">Till ${day(q.valid_until)}</span>`}</td><td class="sm hide-m">${esc(q.created_name || '')}</td>
+          <td data-stop class="nowrap"><a class="btn ghost sm icon" target="_blank" rel="noopener" href="/api/quotations/${q.id}.pdf">${ic('eye', 16)}</a><button class="btn wa sm icon" data-qs="${q.id}">${ic('wa', 15)}</button></td></tr>`).join('')}</tbody></table></div>`
+        : `<div class="empty">${ic('quote')}<div class="b">No quotations yet</div><div class="sm">Open a customer and tap <b>Quotation</b> to create a cost sheet.</div></div>`}</div></div>`;
+    qsa('tr[data-c]').forEach((tr) => (tr.onclick = (ev) => { if (!ev.target.closest('[data-stop]')) go('c-' + tr.dataset.c); }));
+    qsa('[data-qs]').forEach((bn) => (bn.onclick = run(async () => { const q = quotations.find((x) => x.id === bn.dataset.qs); const { url } = await api(`/api/quotations/${q.id}/link`); window.open(quoteWa({ name: q.name, mobile: q.mobile, project_name: q.project_name }, q.id, url), '_blank', 'noopener'); })));
+  }
+
   /* ======================= APPROVALS ======================= */
   async function viewApprovals() {
     loading();
@@ -663,6 +875,10 @@
     const o = await api('/api/outbox');
     const out = o.whatsapp.filter((m) => m.direction === 'out');
     $('view').innerHTML = `<div class="fade-in">${pageHead('WhatsApp', 'Every message the portal sends.')}
+      <div class="card enq p mb-16 row" style="flex-wrap:wrap"><span class="avatar" style="border-radius:10px;background:#fff;color:var(--aqua-d)">${ic('link', 18)}</span><div class="grow" style="min-width:220px"><h3>Customer enquiry link</h3><p class="sm muted">Mobile-friendly form for WhatsApp campaigns and the website — leads are auto-assigned like walk-ins.</p><div class="mono xs mt-8">${esc(enqLink(null))}</div></div>
+        <a class="btn wa sm" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(`Looking for a new home? Tell us what you need and our team will reach out 🏡
+${enqLink(null)}
+— ${state.org.name}`)}">${ic('wa', 15)} Share</a><a class="btn line sm" target="_blank" rel="noopener" href="${esc(enqLink(null))}">${ic('eye', 15)} Open</a></div>
       <div class="banner info mb-16">${ic('wa')}<span><b>Demo mode:</b> messages are prepared here and on each customer page — one tap opens WhatsApp with the text filled in, sent from your own number. Connect the WhatsApp Business API later and they go out automatically.</span></div>
       <div class="g split"><div class="card">${out.length ? out.map((m) => `<div class="li" style="padding:16px 20px;align-items:flex-start;margin:0">${avatar('W A')}<div class="grow"><div class="row gap-6"><b class="sm">To ${ph(m.to_from)}</b>${m.enquiry_id ? `<a class="badge plain" href="#c-${m.enquiry_id}" style="text-decoration:none">${m.enquiry_id}</a>` : ''}<span class="xs muted">${when(m.at)}</span></div>
           <div class="sm mt-8" style="white-space:pre-line">${esc(m.body)}</div></div><a class="btn wa sm" target="_blank" rel="noopener" href="https://wa.me/${esc(String(m.to_from).replace(/\D/g, ''))}?text=${encodeURIComponent(m.body)}">${ic('wa', 15)} Send</a></div>`).join('') : `<div class="empty">${ic('wa')}<div class="b">No messages yet</div></div>`}</div>
@@ -693,22 +909,29 @@
         <div class="stack gap-14"><div class="card p"><div class="row" style="flex-wrap:nowrap"><label style="cursor:pointer;position:relative">${avatar(u.name, u.photoUrl, 'xl')}<span style="position:absolute;right:-2px;bottom:-2px;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:var(--cu-grad);color:#fff;border:2px solid #fff">${ic('upload', 15)}</span><input type="file" id="ph" accept="image/*" hidden></label>
             <div class="grow"><h2>${esc(u.name)}</h2><p class="muted sm">${esc(u.designation)}${u.employeeId ? ' · ' + esc(u.employeeId) : ''}</p><p class="sm mt-8">${ph(u.phone)} · ${esc(u.email)}</p></div></div>
             <p class="xs muted mt-12">Tap your photo to change it — your card updates everywhere instantly.</p></div>
+          <div class="card enq p"><div class="row" style="flex-wrap:nowrap;align-items:flex-start"><span class="avatar" style="border-radius:10px;background:#fff;color:var(--aqua-d)">${ic('link', 18)}</span><div class="grow"><h3>My enquiry link</h3><p class="sm muted">Send it on WhatsApp — leads who fill it come straight to you.</p></div></div>
+            <div class="mono xs mt-12" style="background:#fff;border:1px solid var(--aqua-l);border-radius:8px;padding:9px 11px;overflow-wrap:anywhere">${esc(enqLink(u))}</div>
+            <div class="row mt-12"><a class="btn wa sm" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(`Hi! Share a few details about the home you're looking for and I'll get back to you with plans and pricing 🏡
+${enqLink(u)}
+— ${u.name}, ${state.org.name}`)}">${ic('wa', 15)} Share on WhatsApp</a><button class="btn line sm" id="cpE">${ic('copy', 15)} Copy</button><a class="btn ghost sm" target="_blank" rel="noopener" href="${esc(enqLink(u))}">${ic('eye', 15)} Preview</a></div></div>
           <div class="card p"><h3 class="mb-12">Change PIN</h3><form id="pf" class="fgrid"><div class="field"><label>Current PIN</label><input type="password" name="current" inputmode="numeric" maxlength="6" required></div><div class="field"><label>New PIN</label><input type="password" name="next" inputmode="numeric" maxlength="6" required></div><div><button class="btn">Update PIN</button></div></form></div></div></div></div>`;
     $('vc').innerHTML = MihirCard.html(d); MihirCard.bind($('vc'));
     $('shImg').onclick = run(async () => { const r = await MihirCard.share(d); if (r === 'downloaded') toast('Card image downloaded'); });
+    $('cpE').onclick = async () => { try { await navigator.clipboard.writeText(enqLink(u)); toast('Enquiry link copied'); } catch { toast(enqLink(u)); } };
     $('cpL').onclick = async () => { try { await navigator.clipboard.writeText(u.cardUrl); toast('Link copied'); } catch { toast(u.cardUrl); } };
     $('ph').onchange = run(async (ev) => { const fl = ev.target.files[0]; if (!fl) return; const fd = new FormData(); fd.append('photo', await shrink(fl), fl.name); state.user = (await api('/api/me/photo', { method: 'POST', body: fd })).user; shell(); route(); toast('Photo updated'); });
     $('pf').onsubmit = run(async (ev) => { ev.preventDefault(); await api('/api/me/pin', { json: Object.fromEntries(new FormData(ev.target)) }); ev.target.reset(); toast('PIN changed'); });
   }
 
   /* ======================= helpers ======================= */
+  const enqLink = (u) => `${location.origin}/enquire/${u && ['sales', 'manager'].includes(u.role) ? '?rm=' + u.slug : ''}`;
   async function shrink(file) {
     if (!/^image\//.test(file.type) || file.size < 900 * 1024) return file;
     try { const img = await createImageBitmap(file); const k = Math.min(1, 1600 / Math.max(img.width, img.height)); const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); return await new Promise((r) => c.toBlob((bl) => r(bl || file), 'image/jpeg', 0.82)); } catch { return file; }
   }
   function sigPad(c) {
     const r = c.getBoundingClientRect(); const dpr = window.devicePixelRatio || 1; c.width = r.width * dpr; c.height = r.height * dpr;
-    const g = c.getContext('2d'); g.scale(dpr, dpr); g.lineCap = 'round'; g.lineJoin = 'round'; g.strokeStyle = '#14162B';
+    const g = c.getContext('2d'); g.scale(dpr, dpr); g.lineCap = 'round'; g.lineJoin = 'round'; g.strokeStyle = '#1E2150';
     let down = false, has = false, last = null;
     const pt = (ev) => { const b = c.getBoundingClientRect(); return { x: ev.clientX - b.left, y: ev.clientY - b.top, t: Date.now() }; };
     c.onpointerdown = (ev) => { down = true; c.setPointerCapture(ev.pointerId); last = pt(ev); };

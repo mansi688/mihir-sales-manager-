@@ -18,6 +18,7 @@ const dbUrl = ADMIN.replace(/\/[^/]*$/, '/' + DB);
 for (const f of ['db/test/crm_fixture.sql', 'db/migrations/001_sales_schema.sql', 'db/migrations/002_seed_staff.sql', 'db/migrations/004_booking_application.sql']) psql(dbUrl, '-f', path.join(root, f));
 const roleSql = fs.readFileSync(path.join(root, 'db/migrations/003_app_role.sql.template'), 'utf8').replace(/__PASSWORD__/g, 'smokepass');
 const tmpSql = path.join(os.tmpdir(), DB + '.sql'); fs.writeFileSync(tmpSql, roleSql); psql(dbUrl, '-f', tmpSql); fs.rmSync(tmpSql);
+psql(dbUrl, '-f', path.join(root, 'db/migrations/005_followups_quotations.sql'));
 const u = new URL(dbUrl); u.username = 'sales_portal'; u.password = 'smokepass';
 Object.assign(process.env, {
   DATABASE_URL: u.toString(), KIOSK_KEY: 'test-key', WA_MODE: 'mock', CRM_MODE: 'supabase', INTERNAL_MODE: 'mock', INTERNAL_WEBHOOK_SECRET: 'whsec', JWT_SECRET: 'test',
@@ -156,6 +157,30 @@ const ok = (r, label) => { if (r.status >= 400) { console.error(label, r.status,
   const link = ok(await sales('GET', `/api/enquiries/${sub.id}/share-link`), 'share link').url;
   const shared = await anon('GET', link.replace(/^https?:\/\/[^/]+/, ''));
   assert.strictEqual(shared.status, 200); console.log('  ✓ customer link opens PDF without login');
+
+  console.log('Follow-ups, quotations, analytics, customer portal');
+  ok(await sales('POST', `/api/enquiries/${rep.id}/followups`, { kind: 'Call', dueAt: new Date(Date.now() - 3600e3).toISOString(), note: 'Share floor plans' }), 'schedule follow-up');
+  const fl = ok(await sales('GET', '/api/followups'), 'list follow-ups').followups;
+  assert.ok(fl.some((f) => f.enquiry_id === rep.id));
+  const st = ok(await sales('GET', '/api/stats'), 'stats'); assert.ok(st.followupsOverdue >= 1); console.log('  ✓ overdue follow-up counted');
+  ok(await sales('POST', `/api/followups/${fl[0].id}/done`, { outcome: 'Spoke — interested' }), 'follow-up done');
+  assert.strictEqual((await sales('POST', `/api/followups/${fl[0].id}/done`, {})).status, 400); console.log('  ✓ cannot complete twice');
+  const qt = ok(await sales('POST', `/api/enquiries/${rep.id}/quotations`, { carpet: 900, floor: 5, rate: 9000, floorRise: 25, parking: 300000, otherCharges: 150000 }), 'create quotation');
+  assert.match(qt.id, /^Q-\d+$/);
+  const qrow = await require('../src/db').one('SELECT total, data FROM quotations WHERE id=?', qt.id);
+  // 900*9000=8,100,000 + floor rise 900*25*4=90,000 + parking 300,000 = 8,490,000 AV; GST 424,500; stamp 509,400; reg 30,000; other 150,000
+  assert.strictEqual(Number(qrow.total), 8490000 + 424500 + 509400 + 30000 + 150000); console.log('  ✓ quotation maths');
+  assert.strictEqual((await sales('POST', `/api/enquiries/${rep.id}/quotations`, { rate: 9000 })).status, 400); console.log('  ✓ quotation needs area');
+  const qpdf = await sales('GET', `/api/quotations/${qt.id}.pdf`); assert.strictEqual(qpdf.status, 200); console.log('  ✓ quotation PDF');
+  const qpub = await anon('GET', qt.url.replace(/^https?:\/\/[^/]+/, '')); assert.strictEqual(qpub.status, 200); console.log('  ✓ customer quotation link');
+  const det = ok(await sales('GET', `/api/enquiries/${rep.id}`), 'detail with follow-ups').enquiry; assert.strictEqual(det.quotations.length, 1); assert.strictEqual(det.followups.length, 1);
+  const an = ok(await mgr('GET', '/api/analytics?days=30'), 'analytics'); assert.ok(an.totals.leads >= 3 && an.byPerson.length && an.bySource.length);
+  assert.strictEqual((await sales('GET', '/api/analytics')).status, 403); console.log('  ✓ analytics is for managers / desk');
+  const rmSlug = 'sneha-joshi';
+  const onl = ok(await anon('POST', '/api/public/enquiries', { name: 'Online Lead', mobile: '9822334455', projectId: cfg.projects[0].id, config: cfg.projects[0].configs[0], budget: '₹50 – 75 L', consent: true, rm: rmSlug }), 'online enquiry via RM link');
+  assert.strictEqual(onl.sales.name, 'Sneha Joshi'); console.log('  ✓ online lead goes to the RM whose link was used');
+  const spam = ok(await anon('POST', '/api/public/enquiries', { name: 'Bot', mobile: '9822334456', website: 'http://spam' }), 'honeypot'); assert.strictEqual(spam.id, 'MG-0000'); console.log('  ✓ honeypot ignored');
+  const rmInfo = ok(await anon('GET', `/api/public/rm/${rmSlug}`), 'RM public profile'); assert.strictEqual(rmInfo.name, 'Sneha Joshi');
 
   console.log('Reassign & cards');
   const other = board.team.find((t) => t.name !== cp.sales.name);

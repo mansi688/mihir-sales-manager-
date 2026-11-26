@@ -31,6 +31,7 @@ app.use(require('./routes/webhooks'));
 app.use(auth.session);
 app.use(require('./routes/public'));
 app.use(require('./routes/staff'));
+app.use(require('./routes/crm'));
 
 app.get('/', (_req, res) => res.redirect('/app/'));
 // Local only — on Vercel the CDN serves public/ before requests reach this function.

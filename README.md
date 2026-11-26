@@ -17,6 +17,8 @@ site visit → booking form (real CRM inventory) → KYC → first payment → s
 | Staff app (all roles) | `/app/` |
 | Reception tablet kiosk | `/kiosk/?key=<KIOSK_KEY>` *(remembered on that tablet)* |
 | A sales person's public e-card | `/card/ankit-deshmukh` |
+| **Customer portal** — online enquiry for WhatsApp links | `/enquire/` · `/enquire/?rm=<staff-slug>` routes the lead to that person |
+| Quotation link sent to a customer | `/q/<token>` *(valid 30 days)* |
 | Health check | `/health` |
 
 Demo staff (**PIN 1234 — change them on the Team page**):
@@ -28,6 +30,19 @@ Demo staff (**PIN 1234 — change them on the Team page**):
 | Manager (approves bookings) | 9000000003 | Rajesh Nair |
 | Accounts (verifies payments) | 9000000004 | Neha Gupta |
 | Sales | 9822011223 / 9890144556 / 9765477889 / 9970022334 | Ankit / Priya / Rohan / Sneha |
+
+## Two experiences
+
+- **Customer portal** (`/enquire/`, kiosk, e-cards, quotation links): premium, mobile-first, enquiry-focused.
+  Built for customers who open links from WhatsApp.
+- **Admin sales dashboard** (`/app/`): data-rich. It covers:
+  - customer records (sortable table, filters, CSV export) and the pipeline board;
+  - **follow-ups** (overdue / today / upcoming, outcomes);
+  - **quotations** (cost sheet with GST, stamp duty and registration, PDF, WhatsApp share);
+  - team performance, lead sources and a 14-day walk-in trend.
+
+Design: Inter for body text and Manrope for headings. Colours: indigo for brand and headings, copper for highlights,
+aqua for buttons and links, pale aqua for enquiry sections, warm ivory for the background (`public/assets/styles.css`).
 
 ## How the day works
 
