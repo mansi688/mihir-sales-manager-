@@ -19,7 +19,7 @@
 
   const opts = (name, list, val = (x) => x, lab = (x) => x) =>
     `<div class="opts">${list.map((o) => `<label><input type="radio" name="${name}" value="${esc(val(o))}" ${String(data[name]) === String(val(o)) ? 'checked' : ''}> ${esc(lab(o))}</label>`).join('')}</div>`;
-  const prog = () => `<div class="prog">${[0, 1, 2].map((i) => `<i class="${i <= step ? 'on' : ''}"></i>`).join('')}</div>`;
+  const prog = () => `<div class="k-steps">${['About you', 'Your new home', 'Finish'].map((l, i) => `<div class="${i <= step ? 'on' : ''}"><i></i><span>${l}</span></div>`).join('')}</div>`;
 
   function render() {
     const app = $('app');
@@ -33,7 +33,7 @@
           <div class="field"><label>Email</label><input type="email" name="email" value="${esc(data.email)}" placeholder="optional"></div>
         </div>
         <div class="field"><label>Current residence (area, city)</label><input type="text" name="residence" value="${esc(data.residence)}" placeholder="e.g. Baner, Pune"></div>
-        <div class="row" style="justify-content:flex-end"><button class="btn copper">Next →</button></div>
+        <div class="row" style="justify-content:flex-end"><button class="btn copper lg">Next →</button></div>
       </form>`;
     } else if (step === 1) {
       const proj = cfg.projects.find((p) => String(p.id) === String(data.projectId));
@@ -43,7 +43,7 @@
         <div class="field" id="cfgF"><label>Configuration *</label>${proj ? opts('config', proj.configs) : '<p class="muted small">Choose a project first</p>'}</div>
         <div class="field"><label>Budget *</label>${opts('budget', cfg.budgets)}</div>
         <div class="field"><label>Purpose</label>${opts('purpose', cfg.purposes)}</div>
-        <div class="row between"><button type="button" class="btn ghost" id="back">← Back</button><button class="btn copper">Next →</button></div>
+        <div class="row between"><button type="button" class="btn ghost lg" id="back">← Back</button><button class="btn copper lg">Next →</button></div>
       </form>`;
       app.querySelectorAll('input[name=projectId]').forEach((r) => (r.onchange = () => { grab(); data.config = ''; render(); }));
     } else if (step === 2) {
@@ -53,12 +53,13 @@
         <div class="field ${data.source === 'Channel partner' ? '' : 'hidden'}" id="cpF"><label>Channel partner name</label><input type="text" name="cpName" value="${esc(data.cpName)}"></div>
         <div class="field"><label>When would you like to see the site / sample flat?</label>${opts('visitPref', cfg.visitPrefs)}</div>
         <label class="small" style="font-weight:500;display:flex;gap:10px;align-items:flex-start;margin:8px 0 18px"><input type="checkbox" name="consent" ${data.consent ? 'checked' : ''} style="margin-top:4px;width:20px;height:20px"> I agree that ${esc(cfg.org.name)} may contact me on WhatsApp, phone and email about this enquiry.</label>
-        <div class="row between"><button type="button" class="btn ghost" id="back">← Back</button><button class="btn copper" id="submit">Submit enquiry</button></div>
+        <div class="row between"><button type="button" class="btn ghost lg" id="back">← Back</button><button class="btn copper lg" id="submit">Submit enquiry</button></div>
       </form>`;
       app.querySelectorAll('input[name=source]').forEach((r) => (r.onchange = () => $('cpF').classList.toggle('hidden', r.value !== 'Channel partner')));
     } else {
       const d = data._result; const s = d.sales;
       app.innerHTML = `<div style="text-align:center">
+        <div class="done-ic"><svg class="i" viewBox="0 0 24 24" style="width:32px;height:32px"><path d="M20 6 9 17l-5-5"/></svg></div>
         <span class="chip ok">Enquiry ${esc(d.id)} received</span>
         <h1 style="margin-top:12px">Thank you, ${esc(d.firstName)}!</h1>
         <p class="muted" style="margin-top:-4px;font-size:16px">Scan with your phone camera to chat with your relationship manager on WhatsApp.</p>
@@ -66,7 +67,7 @@
         ${s ? `<div class="rm"><img src="${esc(s.photoUrl || '/assets/mark.png')}" alt=""><div><div class="tiny muted" style="font-weight:700;letter-spacing:.6px">YOUR RELATIONSHIP MANAGER</div><div style="font-family:Montserrat;font-weight:700;font-size:19px">${esc(s.name)}</div><div class="muted small">${esc(s.designation)}</div></div></div>
         <p class="small muted" style="margin-top:12px">${d.busy ? 'Our team is with other guests — someone will be with you very shortly.' : esc(s.name.split(' ')[0]) + ' will meet you in the lounge in a few minutes.'}</p>`
           : '<p>Our reception team will introduce you to a relationship manager shortly.</p>'}
-        <button class="btn" style="margin-top:14px" id="done">Done — return tablet to reception</button></div>`;
+        <button class="btn lg" style="margin-top:18px" id="done">Done — return tablet to reception</button></div>`;
       $('done').onclick = reset;
       armIdle(IDLE_DONE);
       return;
@@ -100,6 +101,9 @@
     } catch (e) { toast(e.message, true); btn.disabled = false; btn.textContent = 'Submit enquiry'; }
   }
 
-  fetch('/api/public/config').then((r) => r.json()).then((c) => { cfg = c; render(); })
+  fetch('/api/public/config').then((r) => r.json()).then((c) => {
+    cfg = c; render();
+    const chips = document.getElementById('projChips'); if (chips) chips.innerHTML = c.projects.map((p) => `<span>${esc(p.name)}</span>`).join('');
+  })
     .catch(() => { $('app').innerHTML = '<div class="card"><h2>Offline</h2><p>Cannot reach the server. Please call reception.</p></div>'; });
 })();

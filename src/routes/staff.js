@@ -6,6 +6,7 @@ const { all, one, run, STAGES, USER_STATUSES, saveFile, getFile } = require('../
 const auth = require('../auth');
 const wf = require('../services/workflow');
 const { crm, inventory } = require('../services/integrations');
+const BF = require('../content/booking-form');
 const { ah, httpError, uploadDoc, uploadPhoto, pngFromDataUrl, todayStartUtc } = require('../util');
 
 const r = express.Router();
@@ -17,7 +18,7 @@ const SALES = auth.requireAuth('sales', 'manager');
 
 async function me(u) {
   return {
-    id: u.id, name: u.name, designation: u.designation, phone: u.phone, email: u.email, role: u.role, status: u.status, slug: u.slug, active: u.active,
+    id: u.id, name: u.name, designation: u.designation, employeeId: u.employee_id || '', phone: u.phone, email: u.email, role: u.role, status: u.status, slug: u.slug, active: u.active,
     photoUrl: u.photo_file_id ? `/media/photos/${u.photo_file_id}` : null, cardUrl: `${config.publicUrl}/card/${u.slug}`,
     projects: await all('SELECT p.id, p.name FROM user_projects up JOIN public.projects p ON p.id=up.project_id WHERE up.user_id=? ORDER BY p.name', u.id),
   };
@@ -34,6 +35,13 @@ r.post('/api/auth/login', ah(async (req, res) => {
 r.post('/api/auth/logout', (_req, res) => { auth.clear(res); res.json({ ok: true }); });
 
 r.get('/api/me', ANY, ah(async (req, res) => res.json({ user: await me(req.user), org: config.org, stages: STAGES, statuses: USER_STATUSES })));
+
+/* Booking Application Form definition + legal text (rendered by the staff app) */
+r.get('/api/booking-form', ANY, (_req, res) => {
+  res.set('Cache-Control', 'private, max-age=300');
+  res.json({ sections: BF.SECTIONS, defaultClp: BF.DEFAULT_CLP, terms: BF.TERMS, cancellation: BF.CANCELLATION,
+    reraSlabs: BF.RERA_SLABS, reraNorms: BF.RERA_NORMS, declaration: BF.DECLARATION, modes: BF.MODES });
+});
 
 r.patch('/api/me', ANY, ah(async (req, res) => {
   const { status } = req.body || {};
@@ -91,6 +99,11 @@ r.post('/api/enquiries/:id/notes', ANY, act((e, req) => {
   return wf.addNote(e, req.user, String(req.body.note).trim().slice(0, 1000));
 }));
 r.put('/api/enquiries/:id/booking', SALES, act((e, req) => wf.saveBooking(e, req.user, req.body || {})));
+r.get('/api/enquiries/:id/application.pdf', ANY, ah(async (req, res) => {
+  const e = await load(req);
+  const pdf = await wf.previewPdf(e);
+  res.set('Content-Disposition', `inline; filename="Booking Application ${e.id}.pdf"`).type('application/pdf').send(pdf);
+}));
 r.post('/api/enquiries/:id/kyc', SALES, uploadDoc.single('file'), act((e, req) => {
   const kind = String(req.body?.kind || '');
   if (!/^(pan|aadhaar|photo|co_pan|co_aadhaar|other)$/.test(kind)) throw httpError(400, 'Unknown document type');
@@ -101,13 +114,13 @@ r.post('/api/enquiries/:id/kyc/complete', SALES, act((e, req) => wf.kycComplete(
 r.post('/api/enquiries/:id/payments', SALES, act((e, req) => wf.submitPayment(e, req.user, req.body || {})));
 r.post('/api/enquiries/:id/signatures', SALES, act(async (e, req) => {
   if (!(await one("SELECT 1 FROM payments WHERE enquiry_id=? AND status='Received'", e.id))) throw httpError(400, 'Signatures open after Accounts verifies the first payment');
-  const { customer, sales } = req.body || {};
-  if (!customer && !sales) throw httpError(400, 'No signature received');
-  const c = customer ? pngFromDataUrl(customer) : null; const s = sales ? pngFromDataUrl(sales) : null;
+  const { customer, coApplicant } = req.body || {};
+  if (!customer && !coApplicant) throw httpError(400, 'No signature received');
+  const c = customer ? pngFromDataUrl(customer) : null; const c2 = coApplicant ? pngFromDataUrl(coApplicant) : null;
   if (c) await wf.saveSignature(e, req.user, 'customer', c);
-  if (s) await wf.saveSignature(e, req.user, 'sales', s);
+  if (c2) await wf.saveSignature(e, req.user, 'co_applicant', c2);
 }));
-r.post('/api/enquiries/:id/approve', MGR, act((e, req) => wf.approveBooking(e, req.user)));
+r.post('/api/enquiries/:id/approve', MGR, act((e, req) => wf.approveBooking(e, req.user, req.body?.developer ? pngFromDataUrl(req.body.developer) : null)));
 r.post('/api/enquiries/:id/reassign', DESK, act((e, req) => {
   if (!String(req.body?.reason || '').trim()) throw httpError(400, 'Give a reason');
   return wf.reassign(e.id, req.body.userId, String(req.body.reason).trim(), req.user);
@@ -187,14 +200,14 @@ async function setProjects(userId, ids) {
 }
 
 r.post('/api/team', MGR, ah(async (req, res) => {
-  const { name, designation, phone, email, role, pin, projectIds } = req.body || {};
+  const { name, designation, phone, email, role, pin, projectIds, employeeId } = req.body || {};
   const ph = auth.normalizePhone(phone);
   if (!String(name || '').trim() || !/^91\d{10}$/.test(ph)) throw httpError(400, 'Name and a valid mobile are required');
   if (!['sales', 'reception', 'manager', 'accounts'].includes(role) && !(role === 'admin' && req.user.role === 'admin')) throw httpError(400, 'Choose a role');
   if (!/^\d{4,6}$/.test(String(pin || ''))) throw httpError(400, 'Starting PIN must be 4–6 digits');
   if (await one('SELECT 1 FROM users WHERE phone=?', ph)) throw httpError(409, 'A user with this mobile already exists');
-  const u = await one('INSERT INTO users(name,designation,phone,email,role,pin_hash,slug) VALUES(?,?,?,?,?,?,?) RETURNING id',
-    String(name).trim(), designation || '', ph, email || '', role, bcrypt.hashSync(String(pin), 10), await slugify(String(name)));
+  const u = await one('INSERT INTO users(name,designation,phone,email,role,pin_hash,slug,employee_id) VALUES(?,?,?,?,?,?,?,?) RETURNING id',
+    String(name).trim(), designation || '', ph, email || '', role, bcrypt.hashSync(String(pin), 10), await slugify(String(name)), String(employeeId || '').trim());
   await setProjects(u.id, projectIds);
   res.json({ ok: true, id: u.id });
 }));
@@ -203,8 +216,8 @@ r.patch('/api/team/:id', MGR, ah(async (req, res) => {
   const u = await one('SELECT * FROM users WHERE id=?', Number(req.params.id));
   if (!u) throw httpError(404, 'User not found');
   const b = req.body || {};
-  await run('UPDATE users SET name=coalesce(?,name), designation=coalesce(?,designation), email=coalesce(?,email), active=coalesce(?,active) WHERE id=?',
-    b.name ?? null, b.designation ?? null, b.email ?? null, b.active === undefined ? null : !!b.active, u.id);
+  await run('UPDATE users SET name=coalesce(?,name), designation=coalesce(?,designation), email=coalesce(?,email), employee_id=coalesce(?,employee_id), active=coalesce(?,active) WHERE id=?',
+    b.name ?? null, b.designation ?? null, b.email ?? null, b.employeeId ?? null, b.active === undefined ? null : !!b.active, u.id);
   if (b.pin) {
     if (!/^\d{4,6}$/.test(String(b.pin))) throw httpError(400, 'PIN must be 4–6 digits');
     await run('UPDATE users SET pin_hash=? WHERE id=?', bcrypt.hashSync(String(b.pin), 10), u.id);
@@ -214,10 +227,12 @@ r.patch('/api/team/:id', MGR, ah(async (req, res) => {
 }));
 
 r.post('/api/channel-partners', MGR, ah(async (req, res) => {
-  const { name, ownerUserId } = req.body || {};
+  const { name, ownerUserId, regCode, repName, phone, email } = req.body || {};
   if (!String(name || '').trim()) throw httpError(400, 'Name required');
-  await run(`INSERT INTO channel_partners(name,owner_user_id) VALUES(?,?)
-      ON CONFLICT (lower(name)) DO UPDATE SET owner_user_id=excluded.owner_user_id`, String(name).trim(), ownerUserId ? Number(ownerUserId) : null);
+  const t = (v) => String(v || '').trim().slice(0, 120);
+  await run(`INSERT INTO channel_partners(name,owner_user_id,reg_code,rep_name,phone,email) VALUES(?,?,?,?,?,?)
+      ON CONFLICT (lower(name)) DO UPDATE SET owner_user_id=excluded.owner_user_id, reg_code=excluded.reg_code, rep_name=excluded.rep_name, phone=excluded.phone, email=excluded.email`,
+  t(name), ownerUserId ? Number(ownerUserId) : null, t(regCode), t(repName), t(phone), t(email));
   res.json({ ok: true });
 }));
 

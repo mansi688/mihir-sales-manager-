@@ -40,7 +40,7 @@ app.use((err, req, res, _next) => {
   const status = err.status || (err.code === 'LIMIT_FILE_SIZE' ? 413 : (err.name === 'MulterError' || /files are allowed/.test(err.message) ? 400 : 500));
   if (status >= 500) console.error(err);
   const msg = status === 413 ? 'File is too large (max 4 MB)' : status >= 500 ? 'Something went wrong — please try again' : err.message;
-  if (req.path.startsWith('/api/')) return res.status(status).json({ error: msg });
+  if (req.path.startsWith('/api/')) return res.status(status).json({ error: msg, errors: status < 500 ? err.errors : undefined });
   res.status(status).send(msg);
 });
 

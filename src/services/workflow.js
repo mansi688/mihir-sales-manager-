@@ -10,6 +10,7 @@ const wa = require('./whatsapp');
 const { crm, inventory, accounts } = require('./integrations');
 const { bookingPdf } = require('./pdf');
 const { httpError } = require('../util');
+const BF = require('../content/booking-form');
 
 const userById = (id) => one('SELECT * FROM users WHERE id=?', id);
 const fmtPhone = (p) => { const d = String(p || '').replace(/\D/g, ''); return d.length === 12 ? `+91 ${d.slice(2, 7)} ${d.slice(7)}` : '+' + d; };
@@ -146,6 +147,31 @@ async function saveBooking(e, user, b) {
   if (['Booked', 'Lost'].includes(e.stage)) throw httpError(400, 'This enquiry is closed');
   const unit = b.flatId ? await inventory.getUnit(String(b.flatId)) : null;
   if (!unit || unit.project_id !== e.project_id) throw httpError(400, 'Choose a unit from this project');
+  const form = BF.normalize(b.form || {});
+
+  // Facts the portal knows: flat from CRM inventory, sales manager from the assigned user, CP from the enquiry.
+  const sm = e.assigned_to ? await userById(e.assigned_to) : user;
+  Object.assign(form, {
+    project: e.project_name, tower: unit.tower, wing: unit.wing || '', unit: unit.flat_no,
+    floor: unit.floor === null ? '' : String(unit.floor), config: unit.flat_type || e.config,
+    smName: sm.name, smEmpId: sm.employee_id || '', smPhone: '+' + sm.phone, smEmail: sm.email,
+  });
+  if (!form.carpetSqft && unit.carpet_area) form.carpetSqft = String(unit.carpet_area);
+  if (!form.carpetSqm && form.carpetSqft) form.carpetSqm = (Number(form.carpetSqft) / 10.7639).toFixed(2);
+  if (!form.cpName && e.cp_name) form.cpName = e.cp_name;
+  if (form.cpName) {
+    const cp = await one('SELECT * FROM channel_partners WHERE lower(name)=lower(?)', form.cpName);
+    if (cp) for (const [k, v] of [['cpCode', cp.reg_code], ['cpRep', cp.rep_name], ['cpPhone', cp.phone], ['cpEmail', cp.email]]) if (!form[k] && v) form[k] = v;
+  }
+  const agreement = Number(form.agreementValue) || null;
+  const other = Number(form.otherCharges) || 0;
+  const total = agreement ? agreement + other : null;
+  form.totalConsideration = total ? String(total) : '';
+  form.clp = form.clp.map((r) => ({ ...r, amount: total ? Math.round((total * r.pct) / 100) : null }));
+
+  const errors = BF.validate(form);
+  if (b.submit && errors.length) throw Object.assign(httpError(400, 'Please complete the application:\n• ' + errors.slice(0, 8).join('\n• ') + (errors.length > 8 ? `\n…and ${errors.length - 8} more` : '')), { errors });
+
   const existing = await one('SELECT * FROM bookings WHERE enquiry_id=?', e.id);
   const holdUntil = await inventory.hold(unit.id, e.id, config.unitHoldHours);
   if (!holdUntil) {
@@ -153,18 +179,24 @@ async function saveBooking(e, user, b) {
     throw httpError(409, `Unit ${unit.flat_no} is ${h ? h.status.toLowerCase() : 'not available'}${h && h.enquiry_id ? ' (' + h.enquiry_id + ')' : ''}`);
   }
   if (existing && existing.flat_id !== unit.id) await inventory.release(existing.flat_id, e.id);
-  const value = String(b.agreementValue || '').replace(/[^\d.]/g, '');
-  const vals = [unit.id, unit.tower, unit.wing || '', unit.floor === null ? '' : String(unit.floor), unit.flat_no, unit.carpet_area === null ? '' : String(unit.carpet_area),
-    value ? Number(value) : null, String(b.paymentPlan || ''), String(b.coApplicant || ''), JSON.stringify(b.extra || {}), holdUntil];
+  const vals = [unit.id, unit.tower, unit.wing || '', form.floor, unit.flat_no, form.carpetSqft || '', agreement, other || null, total,
+    form.funding || '', form.a2.name || '', JSON.stringify(form), holdUntil];
   if (existing) {
-    await run(`UPDATE bookings SET flat_id=?,tower=?,wing=?,floor=?,unit=?,carpet_area=?,agreement_value=?,payment_plan=?,co_applicant=?,extra=?::jsonb,hold_until=?,updated_at=now() WHERE enquiry_id=?`, ...vals, e.id);
+    await run(`UPDATE bookings SET flat_id=?,tower=?,wing=?,floor=?,unit=?,carpet_area=?,agreement_value=?,other_charges=?,total_consideration=?,
+        payment_plan=?,co_applicant=?,extra=?::jsonb,hold_until=?,updated_at=now() WHERE enquiry_id=?`, ...vals, e.id);
   } else {
-    await run(`INSERT INTO bookings(flat_id,tower,wing,floor,unit,carpet_area,agreement_value,payment_plan,co_applicant,extra,hold_until,enquiry_id)
-        VALUES(?,?,?,?,?,?,?,?,?,?::jsonb,?,?)`, ...vals, e.id);
+    await run(`INSERT INTO bookings(flat_id,tower,wing,floor,unit,carpet_area,agreement_value,other_charges,total_consideration,payment_plan,co_applicant,extra,hold_until,enquiry_id)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?::jsonb,?,?)`, ...vals, e.id);
   }
-  await advanceStage(e.id, 'KYC');
-  await logActivity(e.id, user.id, 'booking_form', `Booking form saved — ${unit.tower} ${unit.flat_no} on hold for ${config.unitHoldHours} h`);
+  if (b.submit) {
+    await advanceStage(e.id, 'KYC');
+    await logActivity(e.id, user.id, 'booking_form', `Booking application submitted — ${unit.tower} ${unit.flat_no}, total ₹${(total || 0).toLocaleString('en-IN')}`);
+  } else {
+    await advanceStage(e.id, 'Booking form');
+    if (!existing || existing.flat_id !== unit.id) await logActivity(e.id, user.id, 'booking_draft', `Draft saved — ${unit.tower} ${unit.flat_no} on hold for ${config.unitHoldHours} h`);
+  }
   await crm.sync(e.id, 'bookingForm');
+  return { errors };
 }
 
 async function addKyc(e, user, kind, file) {
@@ -183,19 +215,29 @@ async function kycComplete(e, user) {
   await logActivity(e.id, user.id, 'kyc_complete', 'KYC complete');
 }
 
-async function submitPayment(e, user, { amount, mode, ref }) {
-  if (!(await one('SELECT 1 FROM bookings WHERE enquiry_id=?', e.id))) throw httpError(400, 'Save the booking form first');
+async function submitPayment(e, user, { amount, mode, ref, txnDate, bankName, branch }) {
+  const bk = await one('SELECT total_consideration FROM bookings WHERE enquiry_id=?', e.id);
+  if (!bk) throw httpError(400, 'Save the booking application first');
+  if (STAGE_INDEX(e.stage) < STAGE_INDEX('KYC')) throw httpError(400, 'Submit the booking application first');
   const amt = Number(String(amount ?? '').replace(/[^\d.]/g, ''));
   if (!(amt > 0)) throw httpError(400, 'Enter the amount');
-  if (!mode) throw httpError(400, 'Choose the payment mode');
-  if (mode !== 'Payment link' && !String(ref || '').trim()) throw httpError(400, 'Enter the UTR / cheque / UPI reference');
+  if (!BF.MODES.includes(mode)) throw httpError(400, 'Choose the payment mode');
+  if (mode !== 'Payment link' && !String(ref || '').trim()) throw httpError(400, 'Enter the cheque / UTR / transaction number');
   if (await one("SELECT 1 FROM payments WHERE enquiry_id=? AND status='Pending verification'", e.id)) throw httpError(409, 'A payment is already waiting for Accounts');
-  const p = await one('INSERT INTO payments(enquiry_id,amount,mode,ref,submitted_by) VALUES(?,?,?,?,?) RETURNING *', e.id, amt, mode, String(ref || '').trim(), user.id);
+  if (bk.total_consideration) {
+    const paid = (await one("SELECT coalesce(sum(amount),0) s FROM payments WHERE enquiry_id=? AND status<>'Rejected'", e.id)).s;
+    const cap = Math.floor(bk.total_consideration * 0.10);
+    if (paid + amt > cap) throw httpError(400, `RERA limit: the booking amount before the Agreement for Sale cannot exceed 10% of the total consideration (₹${cap.toLocaleString('en-IN')}).`);
+  }
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(txnDate || '')) ? txnDate : null;
+  const p = await one('INSERT INTO payments(enquiry_id,amount,mode,ref,txn_date,bank_name,branch,submitted_by) VALUES(?,?,?,?,?,?,?,?) RETURNING *',
+    e.id, amt, mode, String(ref || '').trim().slice(0, 60), date, String(bankName || '').trim().slice(0, 80), String(branch || '').trim().slice(0, 80), user.id);
   await advanceStage(e.id, 'Payment');
   await logActivity(e.id, user.id, 'payment_submitted', `₹${amt.toLocaleString('en-IN')} by ${mode} (${p.ref || '—'}) sent to Accounts`);
   await accounts.submitReceipt(e.id, p);
   return p;
 }
+const STAGE_INDEX = (s) => require('../db').STAGES.indexOf(s);
 
 async function verifyPayment(paymentId, by, receiptNo) {
   const p = await one('SELECT * FROM payments WHERE id=?', paymentId);
@@ -225,31 +267,38 @@ async function saveSignature(e, user, party, png) {
   const fileId = await saveFile('signature', 'image/png', `${e.id}-${party}.png`, png);
   await run(`INSERT INTO signatures(enquiry_id,party,file_id,signed_by) VALUES(?,?,?,?)
       ON CONFLICT (enquiry_id,party) DO UPDATE SET file_id=excluded.file_id, signed_by=excluded.signed_by, signed_at=now()`, e.id, party, fileId, user.id);
-  await logActivity(e.id, user.id, 'signature', `${party} signature captured`);
+  const who = { customer: 'First applicant', co_applicant: 'Second applicant', sales: 'Sales', developer: 'Developer' }[party] || party;
+  await logActivity(e.id, user.id, 'signature', `${who} signed the booking application`);
 }
 
-async function approveBooking(e, manager) {
+async function approveBooking(e, manager, developerPng) {
   if (e.stage === 'Booked') throw httpError(400, 'Already booked');
   if (!(await one("SELECT 1 FROM payments WHERE enquiry_id=? AND status='Received'", e.id))) throw httpError(400, 'First payment is not verified yet');
-  const sigRows = await all('SELECT * FROM signatures WHERE enquiry_id=?', e.id);
-  const sig = Object.fromEntries(sigRows.map((s) => [s.party, s]));
-  if (!sig.customer || !sig.sales) throw httpError(400, 'Customer and sales signatures are required first');
+  const bk = await one('SELECT co_applicant FROM bookings WHERE enquiry_id=?', e.id);
+  const sig = Object.fromEntries((await all('SELECT * FROM signatures WHERE enquiry_id=?', e.id)).map((s) => [s.party, s]));
+  if (!sig.customer) throw httpError(400, "First applicant's signature is required first");
+  if (bk && bk.co_applicant && !sig.co_applicant) throw httpError(400, "Second applicant's signature is required first");
+  if (!developerPng) throw httpError(400, 'Sign as the Developer / Authorised Representative to approve');
 
   // Build the PDF before changing anything, so a failure leaves the enquiry ready to retry.
   const full = await fullEnquiry(e.id);
   const now = new Date();
-  const images = {};
-  for (const party of ['customer', 'sales']) images[party] = sig[party].file_id ? (await getFile(sig[party].file_id))?.data : null;
+  const img = async (s) => (s && s.file_id ? (await getFile(s.file_id))?.data : null);
   const pdf = await bookingPdf({
-    enquiry: full, booking: full.booking, payment: full.payments.find((p) => p.status === 'Received'), sales: await userById(full.assigned_to), kyc: full.kyc,
-    signatures: { customer: { ...sig.customer, image: images.customer }, sales: { ...sig.sales, image: images.sales }, manager: { signed_at: now } },
+    enquiry: full, booking: full.booking, payment: full.payments.find((p) => p.status === 'Received'), kyc: full.kyc,
+    signatures: {
+      customer: { ...sig.customer, image: await img(sig.customer) },
+      co_applicant: sig.co_applicant ? { ...sig.co_applicant, image: await img(sig.co_applicant) } : null,
+      developer: { signed_at: now, image: developerPng, name: manager.name, designation: manager.designation },
+    },
   });
 
   const fileId = await tx(async (t) => {
-    const f = await t.one('INSERT INTO files(kind,mime,name,data) VALUES(?,?,?,?) RETURNING id', 'booking_pdf', 'application/pdf', `Booking form ${e.id}.pdf`, pdf);
+    const sf = await t.one('INSERT INTO files(kind,mime,name,data) VALUES(?,?,?,?) RETURNING id', 'signature', 'image/png', `${e.id}-developer.png`, developerPng);
+    const f = await t.one('INSERT INTO files(kind,mime,name,data) VALUES(?,?,?,?) RETURNING id', 'booking_pdf', 'application/pdf', `Booking Application ${e.id}.pdf`, pdf);
     await t.run('UPDATE bookings SET pdf_file_id=?, hold_until=NULL WHERE enquiry_id=?', f.id, e.id);
-    await t.run(`INSERT INTO signatures(enquiry_id,party,file_id,signed_by,signed_at) VALUES(?,'manager',NULL,?,?)
-        ON CONFLICT (enquiry_id,party) DO UPDATE SET signed_by=excluded.signed_by, signed_at=excluded.signed_at`, e.id, manager.id, now);
+    await t.run(`INSERT INTO signatures(enquiry_id,party,file_id,signed_by,signed_at) VALUES(?,'developer',?,?,?)
+        ON CONFLICT (enquiry_id,party) DO UPDATE SET file_id=excluded.file_id, signed_by=excluded.signed_by, signed_at=excluded.signed_at`, e.id, sf.id, manager.id, now);
     await t.run("UPDATE enquiries SET stage='Booked', updated_at=now() WHERE id=?", e.id);
     await t.run("INSERT INTO activities(enquiry_id,user_id,type,note) VALUES(?,?,'approved',?)", e.id, manager.id, `Booking approved by ${manager.name} — ${full.booking.unit} booked`);
     return f.id;
@@ -261,8 +310,24 @@ async function approveBooking(e, manager) {
   const u = await userById(full.assigned_to);
   await wa.template('91' + full.mobile, e.id, config.wa.tplBooked, [first(full.name), full.booking.unit, full.project_name, u.name],
     `Congratulations ${first(full.name)}! Your booking of ${full.booking.unit} at ${full.project_name} is confirmed. — ${u.name}, ${config.org.name}`);
-  if (full.wa_linked_at) await wa.text('91' + full.mobile, e.id, `📄 Your signed booking form: ${link}`);
+  if (full.wa_linked_at) await wa.text('91' + full.mobile, e.id, `📄 Your signed booking application: ${link}`);
   await run("UPDATE users SET status='Available' WHERE id=? AND status='With customer'", u.id);
+}
+
+/** PDF preview of the application as it stands (any stage after the form is saved). */
+async function previewPdf(e) {
+  const full = await fullEnquiry(e.id);
+  if (!full.booking) throw httpError(400, 'Save the booking application first');
+  const sig = full.signatures;
+  const img = async (s) => (s && s.file_id ? (await getFile(s.file_id))?.data : null);
+  return bookingPdf({
+    enquiry: full, booking: full.booking, payment: full.payments.find((p) => p.status !== 'Rejected'), kyc: full.kyc, draft: full.stage !== 'Booked',
+    signatures: {
+      customer: sig.customer ? { ...sig.customer, image: await img(sig.customer) } : null,
+      co_applicant: sig.co_applicant ? { ...sig.co_applicant, image: await img(sig.co_applicant) } : null,
+      developer: sig.developer ? { ...sig.developer, image: await img(sig.developer) } : null,
+    },
+  });
 }
 
 async function markLost(e, user, reason) {
@@ -282,5 +347,5 @@ function shareLink(fileId, days) {
 module.exports = {
   listProjects, getEnquiry, fullEnquiry, createEnquiry, handleInboundWhatsApp, reassign, attend, siteVisit, addNote, saveBooking,
   addKyc, kycComplete, submitPayment, verifyPayment, rejectPayment, saveSignature, approveBooking, markLost, publicProfile, shareLink,
-  REQUIRED_KYC, userById,
+  REQUIRED_KYC, userById, previewPdf,
 };

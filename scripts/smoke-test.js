@@ -15,7 +15,7 @@ const root = path.join(__dirname, '..');
 const psql = (url, ...args) => execFileSync('psql', [url, '-v', 'ON_ERROR_STOP=1', '-q', ...args], { stdio: ['ignore', 'ignore', 'inherit'] });
 psql(ADMIN, '-c', `create database ${DB}`);
 const dbUrl = ADMIN.replace(/\/[^/]*$/, '/' + DB);
-for (const f of ['db/test/crm_fixture.sql', 'db/migrations/001_sales_schema.sql', 'db/migrations/002_seed_staff.sql']) psql(dbUrl, '-f', path.join(root, f));
+for (const f of ['db/test/crm_fixture.sql', 'db/migrations/001_sales_schema.sql', 'db/migrations/002_seed_staff.sql', 'db/migrations/004_booking_application.sql']) psql(dbUrl, '-f', path.join(root, f));
 const roleSql = fs.readFileSync(path.join(root, 'db/migrations/003_app_role.sql.template'), 'utf8').replace(/__PASSWORD__/g, 'smokepass');
 const tmpSql = path.join(os.tmpdir(), DB + '.sql'); fs.writeFileSync(tmpSql, roleSql); psql(dbUrl, '-f', tmpSql); fs.rmSync(tmpSql);
 const u = new URL(dbUrl); u.username = 'sales_portal'; u.password = 'smokepass';
@@ -99,8 +99,26 @@ const ok = (r, label) => { if (r.status >= 400) { console.error(label, r.status,
   const units = ok(await sales('GET', `/api/projects/${heights.id}/units`), 'project units').units;
   assert.ok(units.length > 0 && units.every((x) => x.status === 'Available'));
   const flat = units.find((x) => x.flat_type === '2 BHK');
-  e = ok(await sales('PUT', `/api/enquiries/${sub.id}/booking`, { flatId: flat.id, agreementValue: '11800000', paymentPlan: 'Construction-linked' }), 'booking form + unit hold').enquiry;
-  assert.strictEqual(e.stage, 'KYC'); assert.ok(e.booking.hold_until); assert.strictEqual(e.booking.unit, flat.flat_no);
+  const form = {
+    a1: { name: 'Rahul Sharma', relation: 'Suresh Sharma', dob: '1990-05-12', gender: 'Male', pan: 'abcde1234f', aadhaar: '1234 1234 1234', nationality: 'Indian',
+      address: 'Flat 12, Shanti Apts, Baner Road', city: 'Pune, Maharashtra', pin: '411045', mobile: '9876543210', email: 'rahul@example.com',
+      holder: 'Rahul Sharma', bank: 'HDFC Bank', branch: 'Baner', accountNo: '50100012345678', ifsc: 'HDFC0001234', accountType: 'Savings' },
+    a2: { name: 'Priya Sharma', relation: 'Rahul Sharma', relationship: 'Spouse', dob: '1992-01-02', gender: 'Female', pan: 'PQRSX5678K', address: 'Same', city: 'Pune', pin: '411045', mobile: '9876500000' },
+    agreementValue: '11800000', otherCharges: '200000', parking: '1 covered', funding: 'Home Loan', loanBank: 'SBI', loanAmount: '8000000',
+    declarationAccepted: false,
+  };
+  e = ok(await sales('PUT', `/api/enquiries/${sub.id}/booking`, { flatId: flat.id, form }), 'booking application draft + unit hold').enquiry;
+  assert.strictEqual(e.stage, 'Booking form'); assert.ok(e.booking.hold_until); assert.strictEqual(e.booking.unit, flat.flat_no);
+  assert.strictEqual(e.booking.total_consideration, 12000000); assert.strictEqual(e.booking.extra.a1.pan, 'ABCDE1234F');
+  assert.strictEqual(e.booking.extra.smName, sub.sales.name); assert.strictEqual(e.booking.extra.clp[0].amount, 1200000);
+  const notYet = await sales('PUT', `/api/enquiries/${sub.id}/booking`, { flatId: flat.id, form, submit: true });
+  assert.strictEqual(notYet.status, 400); assert.ok(notYet.data.errors.some((x) => /declaration/.test(x))); console.log('  ✓ submit blocked until declaration accepted');
+  const badClp = await sales('PUT', `/api/enquiries/${sub.id}/booking`, { flatId: flat.id, form: { ...form, declarationAccepted: true, clp: [{ milestone: 'Booking Amount', pct: 20 }, { milestone: 'Rest', pct: 80 }] }, submit: true });
+  assert.ok(badClp.data.errors.some((x) => /10%/.test(x))); console.log('  ✓ CLP booking above 10% rejected (RERA)');
+  e = ok(await sales('PUT', `/api/enquiries/${sub.id}/booking`, { flatId: flat.id, form: { ...form, declarationAccepted: true }, submit: true }), 'booking application submitted').enquiry;
+  assert.strictEqual(e.stage, 'KYC');
+  const prev = await sales('GET', `/api/enquiries/${sub.id}/application.pdf`);
+  assert.strictEqual(prev.status, 200); assert.ok(String(prev.data).startsWith('%PDF')); console.log('  ✓ application PDF preview');
   const after = ok(await sales('GET', `/api/projects/${heights.id}/units`), 'units after hold').units;
   assert.strictEqual(after.find((x) => x.id === flat.id).status, 'On hold');
   const clash = await sales('PUT', `/api/enquiries/${cp.id}/booking`, { flatId: flat.id });
@@ -112,14 +130,21 @@ const ok = (r, label) => { if (r.status >= 400) { console.error(label, r.status,
   }
   ok(await sales('POST', `/api/enquiries/${sub.id}/kyc/complete`, {}), 'KYC complete');
   assert.strictEqual((await sales('POST', `/api/enquiries/${sub.id}/signatures`, { customer: PNG })).status, 400); console.log('  ✓ signatures locked until payment verified');
-  e = ok(await sales('POST', `/api/enquiries/${sub.id}/payments`, { amount: '5,00,000', mode: 'NEFT/RTGS', ref: 'UTR123456' }), 'payment submitted').enquiry;
+  const over = await sales('POST', `/api/enquiries/${sub.id}/payments`, { amount: '15,00,000', mode: 'NEFT/RTGS', ref: 'UTR1' });
+  assert.strictEqual(over.status, 400); assert.ok(/RERA/.test(over.data.error)); console.log('  ✓ payment above 10% blocked (RERA)');
+  e = ok(await sales('POST', `/api/enquiries/${sub.id}/payments`, { amount: '12,00,000', mode: 'NEFT/RTGS', ref: 'UTR123456', txnDate: '2026-11-26', bankName: 'HDFC Bank', branch: 'Baner' }), 'payment submitted').enquiry;
+  assert.strictEqual(e.payments[0].bank_name, 'HDFC Bank');
   const pay = ok(await acc('GET', '/api/payments'), 'accounts queue').payments.find((p) => p.enquiry_id === sub.id);
   assert.ok(pay);
   ok(await anon('POST', '/webhooks/internal/payment', { paymentId: pay.id, status: 'Received', receiptNo: 'RCPT-9001' }, { 'X-Webhook-Secret': 'whsec' }), 'payment verified via internal-portal webhook');
   assert.strictEqual((await mgr('POST', `/api/enquiries/${sub.id}/approve`, {})).status, 400); console.log('  ✓ approval needs signatures');
-  ok(await sales('POST', `/api/enquiries/${sub.id}/signatures`, { customer: PNG, sales: PNG }), 'signatures');
+  ok(await sales('POST', `/api/enquiries/${sub.id}/signatures`, { customer: PNG }), 'first applicant signature');
+  assert.strictEqual((await mgr('POST', `/api/enquiries/${sub.id}/approve`, { developer: PNG })).status, 400); console.log('  ✓ approval needs second applicant signature');
+  ok(await sales('POST', `/api/enquiries/${sub.id}/signatures`, { coApplicant: PNG }), 'second applicant signature');
+  assert.strictEqual((await mgr('POST', `/api/enquiries/${sub.id}/approve`, {})).status, 400); console.log('  ✓ approval needs developer signature');
   assert.strictEqual((await sales('POST', `/api/enquiries/${sub.id}/approve`, {})).status, 403); console.log('  ✓ sales cannot self-approve');
-  e = ok(await mgr('POST', `/api/enquiries/${sub.id}/approve`, {}), 'manager approval').enquiry;
+  e = ok(await mgr('POST', `/api/enquiries/${sub.id}/approve`, { developer: PNG }), 'manager signs & approves').enquiry;
+  assert.ok(e.signatures.developer && e.signatures.co_applicant);
   assert.strictEqual(e.stage, 'Booked'); assert.ok(e.booking.pdf_file_id);
   const sold = ok(await sales('GET', `/api/projects/${heights.id}/units`), 'units after booking').units;
   assert.strictEqual(sold.find((x) => x.id === flat.id).status, 'Sold'); console.log('  ✓ unit marked Sold');

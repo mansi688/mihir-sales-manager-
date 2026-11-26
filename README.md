@@ -43,15 +43,35 @@ Demo staff (**PIN 1234 — change them on the Team page**):
    - Share my details on WhatsApp.
    - E-visiting card (one Mihir format, with Save-contact).
    - Customer list and the full journey for each customer.
-5. **Booking form:** pick tower/wing → an **available flat from the CRM inventory**. The flat goes on hold for 48 h, and double-booking is blocked.
+5. **Booking Application Form** (full screen, 12 sections, from `src/content/booking-form.js`):
+   1. Applicant details: first and second applicant
+   2. Residential & contact
+   3. Booked flat: pick an available flat from the CRM inventory; carpet area, parking, MahaRERA number, possession date, agreement value and other charges give the total consideration
+   4. First transaction
+   5. Applicant bank details
+   6. Home loan / loaning bank
+   7. CLP payment plan: editable milestones, must total 100%, booking ≤ 10%
+   8. Standard T&C
+   9. Cancellation policy plus the **MahaRERA cancellation norms**:
+      - deduction slabs: 0% within 15 days, up to 1% in 16–30 days, up to 1.5% in 31–60 days, up to 2% after 60 days
+      - refund within 45 days
+      - 10% advance cap
+      - designated collection account
+   10. Sales manager (auto-filled) & channel partner
+   11. Customer declaration
+   12. Signatures
+
+   **Save draft** holds the flat for 48 h. **Submit** validates every required field (PAN, IFSC, PIN, CLP = 100%, declaration accepted) and moves the enquiry to KYC. **Preview PDF** works at any stage (it carries a DRAFT watermark until approval).
 6. **KYC:** PAN, Aadhaar and photo. Phone photos are compressed before upload.
-7. **First payment** goes to **Accounts**, who verify it in the Payments page or by internal-portal webhook.
-8. **Signatures** open after verification. The customer and the sales person sign on screen.
-9. **Manager approves.** This:
-   - Generates the booking-form PDF.
+7. **First payment:** amount, date, mode, cheque/UTR, bank and branch go to **Accounts**. The app **blocks any booking amount above 10% of the total consideration** (RERA).
+8. **Signatures** open after Accounts verifies the payment: first applicant and second applicant on screen.
+9. **Manager signs for the Developer / Authorised Representative and approves.** This:
+   - Generates the signed multi-page Booking Application PDF (amount in words; Aadhaar and account numbers masked).
    - Marks the flat *Sold*.
-   - Closes the CRM enquiry with booking notes.
+   - Closes the CRM enquiry.
    - Sends WhatsApp confirmation with a 30-day PDF link.
+
+> The legal text (T&C, cancellation policy, RERA norms, declaration) lives in `src/content/booking-form.js`. Have Mihir's legal team review it before go-live.
 
 ## Deploy (Supabase + Vercel)
 
@@ -59,6 +79,7 @@ Demo staff (**PIN 1234 — change them on the Team page**):
    - `db/migrations/001_sales_schema.sql`
    - `db/migrations/002_seed_staff.sql`
    - `db/migrations/003_app_role.sql.template` (replace `__PASSWORD__` with a long random password first)
+   - `db/migrations/004_booking_application.sql`
 2. **Vercel:** import this GitHub repo (framework *Express* is detected; entry `src/server.js`, static files from `public/`).
 3. Add these environment variables:
    - `DATABASE_URL` = `postgresql://sales_portal.<project-ref>:<password>@aws-0-ap-south-1.pooler.supabase.com:6543/postgres` (Supabase → Connect → *Transaction pooler*; the user is `sales_portal.<project-ref>`)
