@@ -5,6 +5,7 @@
 const PDFDocument = require('pdfkit');
 const config = require('../config');
 const LOGO = require('../assets/logo');
+let LOGO_LIGHT = null; try { LOGO_LIGHT = require('../assets/logo-light'); } catch { /* optional */ }
 const BF = require('../content/booking-form');
 
 const NAVY = '#23284A'; const NAVY2 = '#343A5E'; const COPPER = '#C4895A'; const LINE = '#D9D4CB'; const MUTED = '#6B6F80'; const SOFT = '#F6F2EC';
@@ -16,20 +17,21 @@ const ist = (d) => (d ? new Date(d).toLocaleDateString('en-IN', { timeZone: 'Asi
 const dmy = (s) => (/^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) ? s.split('-').reverse().join('-') : s || '');
 const fmtPhone = (p) => { const d = String(p || '').replace(/\D/g, ''); return d.length === 12 ? `+91 ${d.slice(2, 7)} ${d.slice(7)}` : d.length === 10 ? `+91 ${d.slice(0, 5)} ${d.slice(5)}` : p || ''; };
 
-function bookingPdf({ enquiry, booking, payment, signatures, draft }) {
+function bookingPdf({ enquiry, booking, payment, signatures, draft, blank }) {
   const form = booking.extra || {};
   const a1 = form.a1 || {}; const a2 = form.a2 || {};
-  const hasA2 = !!a2.name;
+  const hasA2 = blank || !!a2.name;
+  const EMPTY = blank ? '' : '—';
 
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'A4', margins: { top: M, bottom: 30, left: M, right: M }, bufferPages: true,
-      info: { Title: `Booking Application ${enquiry.id}`, Author: config.org.name } });
+      info: { Title: blank ? 'Booking Application Form (blank)' : `Booking Application ${enquiry.id}`, Author: config.org.name } });
     const chunks = [];
     doc.on('data', (c) => chunks.push(c)); doc.on('end', () => resolve(Buffer.concat(chunks))); doc.on('error', reject);
 
     const pageTop = () => {
       doc.image(LOGO, M, 26, { height: 40 });
-      doc.font('Helvetica').fontSize(7.5).fillColor(MUTED).text(`${enquiry.id}  ·  ${config.org.name}  ·  ${config.org.website}`, M, 40, { width: W, align: 'right' });
+      doc.font('Helvetica').fontSize(7.5).fillColor(MUTED).text(`${blank ? 'Booking No. ____________' : enquiry.id}  ·  ${config.org.name}  ·  ${config.org.website}`, M, 40, { width: W, align: 'right' });
       doc.moveTo(M, 74).lineTo(M + W, 74).lineWidth(1.2).strokeColor(COPPER).stroke();
       doc.y = 86;
     };
@@ -62,8 +64,8 @@ function bookingPdf({ enquiry, booking, payment, signatures, draft }) {
       }
       for (const r of rows) {
         doc.font('Helvetica').fontSize(8.5);
-        const cells = r.map((c) => T(c === undefined || c === null || c === '' ? '—' : c));
-        const h = Math.max(16, ...cells.map((c, i) => doc.heightOfString(c, { width: ws[i] - pad * 2 }) + 8));
+        const cells = r.map((c) => T(c === undefined || c === null || c === '' ? EMPTY : c));
+        const h = Math.max(blank ? 21 : 16, ...cells.map((c, i) => doc.heightOfString(c, { width: ws[i] - pad * 2 }) + 8));
         space(h);
         const y = doc.y;
         cells.forEach((c, i) => {
@@ -100,12 +102,14 @@ function bookingPdf({ enquiry, booking, payment, signatures, draft }) {
     doc.y += 8;
     const box = doc.y;
     doc.roundedRect(M, box, W, 58, 4).fill(SOFT);
-    const kv = [['Project Name', form.project || enquiry.project_name], ['Application / Booking No.', enquiry.id],
-      ['Booking Date', ist(booking.created_at)], ['Unit Configuration', form.config || enquiry.config]];
+    const kv = blank ? [['Project Name', ''], ['Application / Booking No.', ''], ['Booking Date', ''], ['Unit Configuration', '']]
+      : [['Project Name', form.project || enquiry.project_name], ['Application / Booking No.', enquiry.id],
+        ['Booking Date', ist(booking.created_at)], ['Unit Configuration', form.config || enquiry.config]];
     kv.forEach(([k, v], i) => {
       const x = M + 12 + (i % 2) * (W / 2); const y = box + 9 + Math.floor(i / 2) * 24;
       doc.font('Helvetica').fontSize(7.5).fillColor(MUTED).text(k.toUpperCase(), x, y, { characterSpacing: 0.5 });
-      doc.font('Helvetica-Bold').fontSize(10.5).fillColor(NAVY).text(T(v || '—'), x, y + 9, { width: W / 2 - 24 });
+      if (blank) doc.moveTo(x, y + 21).lineTo(x + W / 2 - 34, y + 21).lineWidth(0.5).strokeColor('#B9B2A5').stroke();
+      else doc.font('Helvetica-Bold').fontSize(10.5).fillColor(NAVY).text(T(v || '—'), x, y + 9, { width: W / 2 - 24 });
     });
     doc.y = box + 66;
 
@@ -114,7 +118,7 @@ function bookingPdf({ enquiry, booking, payment, signatures, draft }) {
 
     section(2, 'Residential & Contact Details');
     table(pairRows(sec('contact')), heads);
-    table([['Correspondence Address (if different)', form.corrAddress || 'Same as residential address']]);
+    table([['Correspondence Address (if different)', blank ? '' : form.corrAddress || 'Same as residential address']]);
 
     section(3, 'Booked Flat Details');
     table([
@@ -127,10 +131,10 @@ function bookingPdf({ enquiry, booking, payment, signatures, draft }) {
     ]);
 
     section(4, 'First Transaction / Booking Payment Details');
-    table(payment ? [
-      ['Booking Amount', rs(payment.amount)], ['Transaction Date', ist(payment.txn_date || payment.submitted_at)], ['Payment Mode', payment.mode],
-      ['Cheque / UTR / Transaction No.', payment.ref], ['Bank Name', payment.bank_name], ['Branch', payment.branch],
-      ['Transaction Status', payment.status + (payment.receipt_no ? ` · Receipt ${payment.receipt_no}` : '')], ['Amount in Words', BF.amountInWords(payment.amount)],
+    table(payment || blank ? [
+      ['Booking Amount', blank ? 'Rs.' : rs(payment.amount)], ['Transaction Date', blank ? '' : ist(payment.txn_date || payment.submitted_at)], ['Payment Mode', blank ? 'UPI / NEFT / RTGS / IMPS / Cheque / DD' : payment.mode],
+      ['Cheque / UTR / Transaction No.', blank ? '' : payment.ref], ['Bank Name', blank ? '' : payment.bank_name], ['Branch', blank ? '' : payment.branch],
+      ['Transaction Status', blank ? '' : payment.status + (payment.receipt_no ? ` · Receipt ${payment.receipt_no}` : '')], ['Amount in Words', blank ? '' : BF.amountInWords(payment.amount)],
     ] : [['Booking Amount', 'Not yet received']]);
 
     section(5, 'Applicant Bank Details');
@@ -138,8 +142,8 @@ function bookingPdf({ enquiry, booking, payment, signatures, draft }) {
     doc.font('Helvetica-Oblique').fontSize(7.5).fillColor(MUTED).text(sec('bank').note, M, doc.y, { width: W }); doc.y += 4;
 
     section(6, 'Home Loan / Financing Details');
-    table(form.funding && form.funding !== 'Self-Funded' ? [
-      ['Funding Source', form.funding], ['Loaning Bank / NBFC', form.loanBank], ['Bank Branch', form.loanBranch], ['Bank Contact Person', form.loanOfficer],
+    table(blank || (form.funding && form.funding !== 'Self-Funded') ? [
+      ['Funding Source', blank ? 'Self-Funded / Home Loan / Part Loan' : form.funding], ['Loaning Bank / NBFC', form.loanBank], ['Bank Branch', form.loanBranch], ['Bank Contact Person', form.loanOfficer],
       ['Bank Contact Number', form.loanPhone && fmtPhone(form.loanPhone)], ['Loan Amount Sanctioned / Applied', rs(form.loanAmount)], ['Sanction / Application Ref. No.', form.loanRef],
     ] : [['Funding Source', form.funding || 'Self-Funded']]);
 
@@ -150,14 +154,14 @@ function bookingPdf({ enquiry, booking, payment, signatures, draft }) {
       const head = ['Sr.', 'Payment Milestone', 'Payment %', 'Amount (Rs.)', 'Due Date'];
       space(20); let y = doc.y; doc.rect(M, y, W, 16).fill(SOFT);
       doc.font('Helvetica-Bold').fontSize(8).fillColor(NAVY2); head.forEach((h, i) => doc.text(h, xs[i] + 5, y + 4.5, { width: cols[i] * W - 10 })); doc.y = y + 16;
-      const rows = (form.clp || []).map((r, i) => [String(i + 1), r.milestone, `${r.pct}%`, r.amount ? Number(r.amount).toLocaleString('en-IN') : '', dmy(r.due)]);
+      const rows = (blank ? BF.DEFAULT_CLP.map((r) => ({ milestone: r.milestone })) : form.clp || []).map((r, i) => [String(i + 1), r.milestone, blank ? '' : `${r.pct}%`, r.amount ? Number(r.amount).toLocaleString('en-IN') : '', dmy(r.due)]);
       const tot = (form.clp || []).reduce((t, r) => t + (Number(r.pct) || 0), 0);
-      rows.push(['', 'Total', `${tot}%`, form.totalConsideration ? Number(form.totalConsideration).toLocaleString('en-IN') : '', '']);
+      rows.push(['', 'Total', blank ? '100%' : `${tot}%`, form.totalConsideration ? Number(form.totalConsideration).toLocaleString('en-IN') : '', '']);
       rows.forEach((r, ri) => {
-        space(16); y = doc.y;
+        space(blank ? 21 : 16); y = doc.y;
         doc.font(ri === rows.length - 1 ? 'Helvetica-Bold' : 'Helvetica').fontSize(8.5).fillColor('#1d1f2e');
-        r.forEach((c, i) => doc.text(c || '—', xs[i] + 5, y + 4, { width: cols[i] * W - 10 }));
-        doc.moveTo(M, y + 16).lineTo(M + W, y + 16).lineWidth(0.5).strokeColor(LINE).stroke(); doc.y = y + 16;
+        r.forEach((c, i) => doc.text(c || EMPTY, xs[i] + 5, y + (blank ? 6 : 4), { width: cols[i] * W - 10 }));
+        { const rh = blank ? 21 : 16; doc.moveTo(M, y + rh).lineTo(M + W, y + rh).lineWidth(0.5).strokeColor(LINE).stroke(); doc.y = y + rh; }
       });
       doc.y += 6;
     }
@@ -177,21 +181,22 @@ function bookingPdf({ enquiry, booking, payment, signatures, draft }) {
     sub('Sales Manager Details');
     table([['Sales Manager Name', form.smName], ['Employee ID', form.smEmpId], ['Contact Number', fmtPhone(form.smPhone)], ['Email ID', form.smEmail]]);
     sub('Channel Partner Details (if applicable)');
-    table(form.cpName ? [['Channel Partner / Agency Name', form.cpName], ['CP Registration Code', form.cpCode], ['CP Representative Name', form.cpRep],
+    table(form.cpName || blank ? [['Channel Partner / Agency Name', form.cpName], ['CP Registration Code', form.cpCode], ['CP Representative Name', form.cpRep],
       ['Contact Number', form.cpPhone && fmtPhone(form.cpPhone)], ['Email ID', form.cpEmail]] : [['Channel Partner', 'Not applicable — direct booking']]);
 
     section(11, 'Customer Declaration & Undertaking');
     list(BF.DECLARATION, false);
+    if (blank) { const yy = doc.y + 2; doc.rect(M, yy, 9, 9).lineWidth(0.8).strokeColor(NAVY2).stroke(); doc.font('Helvetica-Bold').fontSize(8.5).fillColor(NAVY2).text('I/We have read and accept the declaration, terms & conditions and cancellation policy.', M + 15, yy, { width: W - 15 }); doc.y += 6; } else
     doc.font('Helvetica-Bold').fontSize(8.5).fillColor(form.declarationAccepted ? '#1F7A4D' : '#A12C2C')
       .text(form.declarationAccepted ? 'Accepted by the applicant(s) on the booking application.' : 'Declaration not yet accepted', M, doc.y, { width: W });
     doc.y += 6;
 
+    space(175);
     section(12, 'Signatures');
-    space(130);
     const sy = doc.y + 4;
     const boxes = [
-      ['First Applicant', a1.name || enquiry.name, signatures.customer],
-      ['Second Applicant', hasA2 ? a2.name : 'N/A', hasA2 ? signatures.co_applicant : null],
+      ['First Applicant', blank ? '' : a1.name || enquiry.name, signatures.customer],
+      ['Second Applicant', blank ? '' : hasA2 ? a2.name : 'N/A', hasA2 ? signatures.co_applicant : null],
       ['For Developer / Authorised Representative', signatures.developer ? `${signatures.developer.name || ''}${signatures.developer.designation ? ', ' + signatures.developer.designation : ''}` : '', signatures.developer],
     ];
     const bw = (W - 20) / 3;
@@ -204,7 +209,7 @@ function bookingPdf({ enquiry, booking, payment, signatures, draft }) {
       if (!drawn && s) doc.font('Helvetica-Oblique').fontSize(9).fillColor(NAVY2).text('Signed digitally', x + 10, sy + 44);
       doc.moveTo(x + 8, sy + 76).lineTo(x + bw - 8, sy + 76).lineWidth(0.6).strokeColor('#9a9a9a').stroke();
       doc.font('Helvetica').fontSize(7.5).fillColor(MUTED).text('Name', x + 8, sy + 81);
-      doc.font('Helvetica-Bold').fontSize(8).fillColor('#1d1f2e').text(T(name || '—'), x + 8, sy + 90, { width: bw - 16, height: 11, ellipsis: true });
+      doc.font('Helvetica-Bold').fontSize(8).fillColor('#1d1f2e').text(T(name || (blank ? '' : '—')), x + 8, sy + 90, { width: bw - 16, height: 11, ellipsis: true });
       doc.font('Helvetica').fontSize(7.5).fillColor(MUTED).text(`Date: ${s ? ist(s.signed_at) : '____________'}`, x + 8, sy + 104);
     });
     doc.y = sy + 126;
@@ -225,4 +230,79 @@ function bookingPdf({ enquiry, booking, payment, signatures, draft }) {
   });
 }
 
-module.exports = { bookingPdf };
+/**
+ * Walk-in Enquiry Form — blank (for paper backup at reception) or filled from an enquiry.
+ * opts: { enquiry?, projects: [{name, configs}], sources, budgets, purposes, visitPrefs, salesName? }
+ */
+function enquiryPdf(o) {
+  const e = o.enquiry || null;
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: 'A4', margins: { top: M, bottom: 20, left: M, right: M }, info: { Title: e ? `Enquiry ${e.id}` : 'Walk-in Enquiry Form', Author: config.org.name } });
+    const chunks = [];
+    doc.on('data', (c) => chunks.push(c)); doc.on('end', () => resolve(Buffer.concat(chunks))); doc.on('error', reject);
+
+    doc.rect(0, 0, 595.28, 96).fill(NAVY);
+    doc.image(LOGO_LIGHT || LOGO, M, 18, { height: 60 });
+    doc.font('Helvetica-Bold').fontSize(17).fillColor('#fff').text('WALK-IN ENQUIRY FORM', 0, 32, { width: 595.28 - M, align: 'right' });
+    doc.font('Helvetica').fontSize(8.5).fillColor('#E9D6C2').text(`${config.org.tagline.toUpperCase()}   ·   ${config.org.website}`, 0, 54, { width: 595.28 - M, align: 'right', characterSpacing: 1 });
+    doc.rect(0, 96, 595.28, 3).fill(COPPER);
+    let y = 114;
+
+    const head = (n, t) => { doc.font('Helvetica-Bold').fontSize(9.5).fillColor(COPPER).text(n, M, y); doc.fillColor(NAVY2).text(t.toUpperCase(), M + 20, y, { characterSpacing: 0.6 }); y += 16; };
+    const line = (label, value, x, w) => {
+      doc.font('Helvetica').fontSize(7.5).fillColor(MUTED).text(label, x, y);
+      if (value) doc.font('Helvetica-Bold').fontSize(10.5).fillColor('#1d1f2e').text(T(value), x, y + 10, { width: w, height: 13, ellipsis: true });
+      doc.moveTo(x, y + 25).lineTo(x + w, y + 25).lineWidth(0.6).strokeColor('#B9B2A5').stroke();
+    };
+    const boxes = (label, list, chosen) => {
+      doc.font('Helvetica').fontSize(7.5).fillColor(MUTED).text(label, M, y); y += 12;
+      let x = M;
+      for (const item of list) {
+        doc.font('Helvetica').fontSize(9.5);
+        const w = doc.widthOfString(item) + 26;
+        if (x + w > M + W) { x = M; y += 18; }
+        doc.roundedRect(x, y, 11, 11, 2).lineWidth(0.8).strokeColor(NAVY2).stroke();
+        if (chosen && String(chosen) === String(item)) { doc.moveTo(x + 2.5, y + 6).lineTo(x + 4.8, y + 8.6).lineTo(x + 9, y + 2.6).lineWidth(1.6).strokeColor(COPPER).stroke(); }
+        doc.fillColor('#1d1f2e').text(item, x + 16, y + 1);
+        x += w + 8;
+      }
+      y += 24;
+    };
+
+    head('01', 'About you');
+    line('Full name', e && e.name, M, W); y += 34;
+    line('Mobile (WhatsApp)', e && '+91 ' + e.mobile, M, W / 2 - 10); line('Email', e && e.email, M + W / 2 + 10, W / 2 - 10); y += 34;
+    line('Current residence (area, city)', e && e.residence, M, W); y += 40;
+
+    head('02', 'What are you looking for?');
+    boxes('Project', o.projects.map((p) => p.name), e && e.project_name);
+    const configs = [...new Set(o.projects.flatMap((p) => p.configs))];
+    boxes('Configuration', configs, e && e.config);
+    boxes('Budget', o.budgets.map((b) => b.replace(/₹/g, 'Rs. ')), e && e.budget.replace(/₹/g, 'Rs. '));
+    boxes('Purpose', o.purposes, e && e.purpose);
+
+    head('03', 'How did you hear about us?');
+    boxes('Source', o.sources, e && e.source);
+    line('Channel partner name (if any)', e && e.cp_name, M, W); y += 36;
+    boxes('Preferred site / sample-flat visit', o.visitPrefs, e && e.visit_pref);
+
+    y += 2;
+    doc.roundedRect(M, y, W, 40, 6).fill(SOFT);
+    doc.rect(M + 10, y + 13, 10, 10).lineWidth(0.8).strokeColor(NAVY2).stroke();
+    if (e && e.consent) doc.moveTo(M + 12, y + 18).lineTo(M + 14.5, y + 21).lineTo(M + 19, y + 15).lineWidth(1.6).strokeColor(COPPER).stroke();
+    doc.font('Helvetica').fontSize(8.5).fillColor('#2a2c3a').text(`I agree that ${config.org.name} may contact me on WhatsApp, phone and email about this enquiry.`, M + 28, y + 14, { width: W - 40 });
+    y += 52;
+    line('Customer signature', '', M, W / 2 - 10); line('Date', e && ist(e.created_at), M + W / 2 + 10, W / 2 - 10); y += 42;
+
+    doc.roundedRect(M, y, W, 66, 6).lineWidth(0.8).dash(3, { space: 3 }).strokeColor(COPPER).stroke().undash();
+    doc.font('Helvetica-Bold').fontSize(8).fillColor(COPPER).text('FOR OFFICE USE', M + 10, y + 8, { characterSpacing: 1 });
+    y += 24;
+    const cw = (W - 40) / 3;
+    line('Enquiry no.', e && e.id, M + 10, cw); line('Assigned sales person', o.salesName || (e && e.assigned_name), M + 20 + cw, cw); line('Time in', e && new Date(e.created_at).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' }), M + 30 + cw * 2, cw);
+
+    doc.font('Helvetica').fontSize(7).fillColor(MUTED).text(`${config.org.name} · Your details are used only to assist you with this enquiry.`, M, 841.89 - 34, { width: W, align: 'center', lineBreak: false });
+    doc.end();
+  });
+}
+
+module.exports = { bookingPdf, enquiryPdf };

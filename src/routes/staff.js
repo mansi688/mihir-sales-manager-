@@ -7,6 +7,8 @@ const auth = require('../auth');
 const wf = require('../services/workflow');
 const { crm, inventory } = require('../services/integrations');
 const BF = require('../content/booking-form');
+const EO = require('../content/enquiry-options');
+const { bookingPdf, enquiryPdf } = require('../services/pdf');
 const { ah, httpError, uploadDoc, uploadPhoto, pngFromDataUrl, todayStartUtc } = require('../util');
 
 const r = express.Router();
@@ -19,7 +21,7 @@ const SALES = auth.requireAuth('sales', 'manager');
 async function me(u) {
   return {
     id: u.id, name: u.name, designation: u.designation, employeeId: u.employee_id || '', phone: u.phone, email: u.email, role: u.role, status: u.status, slug: u.slug, active: u.active,
-    photoUrl: u.photo_file_id ? `/media/photos/${u.photo_file_id}` : null, cardUrl: `${config.publicUrl}/card/${u.slug}`,
+    photoUrl: u.photo_file_id ? `/media/photos/${u.photo_file_id}` : null, cardUrl: `${config.publicUrl}/card/${u.slug}`, qrUrl: `/card/${u.slug}/qr.png`,
     projects: await all('SELECT p.id, p.name FROM user_projects up JOIN public.projects p ON p.id=up.project_id WHERE up.user_id=? ORDER BY p.name', u.id),
   };
 }
@@ -142,6 +144,18 @@ r.get('/api/enquiries/:id/share-link', ANY, ah(async (req, res) => {
   res.json({ url: wf.shareLink(b.pdf_file_id, 30) });
 }));
 
+/* ---------- Printable forms ---------- */
+const pdfOut = (res, name, buf, download) => res.set('Content-Disposition', `${download ? 'attachment' : 'inline'}; filename="${name}"`).set('Cache-Control', 'private, max-age=60').type('application/pdf').send(buf);
+const enquiryOpts = async () => ({ projects: await wf.listProjects(), sources: EO.SOURCES, budgets: EO.BUDGETS, purposes: EO.PURPOSES, visitPrefs: EO.VISIT_PREFS });
+r.get('/api/forms/booking-application.pdf', ANY, ah(async (req, res) => {
+  pdfOut(res, 'Mihir Booking Application Form.pdf', await bookingPdf({ blank: true, enquiry: {}, booking: { extra: {} }, signatures: {} }), req.query.download);
+}));
+r.get('/api/forms/enquiry.pdf', ANY, ah(async (req, res) => pdfOut(res, 'Mihir Walk-in Enquiry Form.pdf', await enquiryPdf(await enquiryOpts()), req.query.download)));
+r.get('/api/enquiries/:id/enquiry.pdf', ANY, ah(async (req, res) => {
+  const e = await load(req);
+  pdfOut(res, `Enquiry ${e.id}.pdf`, await enquiryPdf({ ...(await enquiryOpts()), enquiry: e }), req.query.download);
+}));
+
 /* Protected KYC / signature files */
 r.get('/api/files/:id', ANY, ah(async (req, res) => {
   const fileId = req.params.id;
@@ -151,6 +165,24 @@ r.get('/api/files/:id', ANY, ah(async (req, res) => {
   await load({ params: { id: owner.enquiry_id }, user: req.user });
   const f = await getFile(fileId);
   res.set('Cache-Control', 'private, max-age=300').type(f.mime).send(f.data);
+}));
+
+/* Kiosk key for staff devices (lets any staff phone/tablet open the walk-in form) */
+r.get('/api/kiosk-link', ANY, (_req, res) => res.json({ url: `/kiosk/?key=${encodeURIComponent(config.kioskKey)}` }));
+
+/* ---------- Pipeline stats (sales: own customers; others: everyone) ---------- */
+r.get('/api/stats', ANY, ah(async (req, res) => {
+  const mine = req.user.role === 'sales';
+  const where = mine ? 'WHERE assigned_to=?' : '';
+  const args = mine ? [req.user.id] : [];
+  const stages = await all(`SELECT stage, count(*)::int c FROM enquiries ${where} GROUP BY stage`, ...args);
+  const month = new Date(); month.setUTCDate(1); month.setUTCHours(0, 0, 0, 0);
+  const booked = await one(`SELECT count(*)::int c, coalesce(sum(b.total_consideration),0) v FROM activities a JOIN enquiries e ON e.id=a.enquiry_id
+      JOIN bookings b ON b.enquiry_id=e.id WHERE a.type='approved' AND a.at>=? ${mine ? 'AND e.assigned_to=?' : ''}`, month.toISOString(), ...args);
+  const today = await one(`SELECT count(*)::int c FROM enquiries WHERE created_at>=? ${mine ? 'AND assigned_to=?' : ''}`, todayStartUtc(), ...args);
+  const pending = await one("SELECT count(*)::int c FROM payments WHERE status='Pending verification'");
+  const approvals = await one("SELECT count(*)::int c FROM enquiries WHERE stage='Signatures'");
+  res.json({ stages: Object.fromEntries(stages.map((x) => [x.stage, x.c])), bookedThisMonth: booked.c, valueThisMonth: booked.v, today: today.c, pendingPayments: pending.c, approvals: approvals.c });
 }));
 
 /* ---------- Inventory (real CRM flats) ---------- */

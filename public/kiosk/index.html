@@ -1,25 +1,30 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<meta name="theme-color" content="#1B1F3B">
-<title>Welcome — Mihir Group</title>
-<link rel="icon" href="/assets/mark.png">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#262B52">
+<title>Welcome · Mihir Group</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<link rel="icon" href="/assets/icon-192.png">
 <link rel="stylesheet" href="/assets/styles.css">
 </head>
 <body>
 <div class="kiosk">
-  <aside class="k-art">
-    <img src="/assets/logo-light.png" alt="Mihir Group">
-    <div class="tag">LIVE BEYOND TIME</div>
-    <h1>Welcome to the Mihir sales lounge.</h1>
-    <p>Share a few details and your relationship manager will be with you in minutes.</p>
-    <div class="projects" id="projChips"></div>
+  <aside class="k-side">
+    <img class="logo" src="/assets/logo-light.png" alt="Mihir Group">
+    <div class="tag">WELCOME</div>
+    <h1>Your new home<br>starts here.</h1>
+    <p>Tell us a little about what you're looking for — it takes about a minute. A relationship manager will be with you right after.</p>
+    <div class="proj" id="projChips"></div>
   </aside>
-  <main class="k-main"><div class="wrap" id="app"><p class="muted">Loading…</p></div></main>
+  <main class="k-main">
+    <div class="k-top" id="top"></div>
+    <div class="k-body"><div id="app" style="width:100%"></div></div>
+  </main>
 </div>
-<div class="toast" id="toast"></div>
+<div id="toast" class="toast"></div>
 <script src="/kiosk/kiosk.js"></script>
 </body>
 </html>
