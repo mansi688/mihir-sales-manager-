@@ -20,6 +20,7 @@ const roleSql = fs.readFileSync(path.join(root, 'db/migrations/003_app_role.sql.
 const tmpSql = path.join(os.tmpdir(), DB + '.sql'); fs.writeFileSync(tmpSql, roleSql); psql(dbUrl, '-f', tmpSql); fs.rmSync(tmpSql);
 psql(dbUrl, '-f', path.join(root, 'db/migrations/005_followups_quotations.sql'));
 psql(dbUrl, '-f', path.join(root, 'db/migrations/006_customer_forms.sql'));
+psql(dbUrl, '-f', path.join(root, 'db/migrations/007_usernames.sql'));
 const u = new URL(dbUrl); u.username = 'sales_portal'; u.password = 'smokepass';
 Object.assign(process.env, {
   DATABASE_URL: u.toString(), KIOSK_KEY: 'test-key', WA_MODE: 'mock', CRM_MODE: 'supabase', INTERNAL_MODE: 'mock', INTERNAL_WEBHOOK_SECRET: 'whsec', JWT_SECRET: 'test',
@@ -83,6 +84,9 @@ const ok = (r, label) => { if (r.status >= 400) { console.error(label, r.status,
   const sp = { 'Ankit Deshmukh': '9822011223', 'Priya Kulkarni': '9890144556', 'Rohan Patil': '9765477889', 'Sneha Joshi': '9970022334' }[sub.sales.name];
   ok(await sales('POST', '/api/auth/login', { phone: sp, pin: '1234' }), 'sales login');
   ok(await desk('POST', '/api/auth/login', { phone: '9000000002', pin: '1234' }), 'reception login');
+  const u1 = client(); ok(await u1('POST', '/api/auth/login', { username: 'Kavita', password: '1234' }), 'login with username');
+  assert.strictEqual((await u1('POST', '/api/auth/login', { username: 'nobody', password: '1234' })).status, 401); console.log('  ✓ unknown username rejected');
+  ok(await mgr('POST', '/api/auth/login', { phone: '9000000003', pin: '1234' }), 'manager login (pre)');
   ok(await mgr('POST', '/api/auth/login', { phone: '9000000003', pin: '1234' }), 'manager login');
   ok(await acc('POST', '/api/auth/login', { phone: '9000000004', pin: '1234' }), 'accounts login');
 

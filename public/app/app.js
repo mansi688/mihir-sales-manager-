@@ -113,25 +113,24 @@
         <div class="feat"><span>Reception kiosk</span><span>Smart assignment</span><span>Follow-ups</span><span>Quotations</span><span>RERA-ready</span></div></div>
       <div class="pane"><a class="btn ghost sm back" href="/">${ic('back', 15)} Home</a>
         <form id="lf" novalidate>
-          <div class="over" style="color:var(--cu-d)">${greet}</div><h1 style="margin:6px 0 4px">Sign in to Mihir Sales</h1><p class="muted" style="margin-bottom:24px">Use your registered mobile number and PIN.</p>
-          <div class="field"><label for="lphone">Mobile number</label><div class="ph-in"><span>+91</span><input type="tel" id="lphone" required placeholder="98XXX XXXXX" autocomplete="username" inputmode="numeric" maxlength="10" value="${esc(last)}"></div></div>
-          <div class="field"><label for="lpin">PIN</label><div style="position:relative"><input type="password" id="lpin" class="pin-in" required inputmode="numeric" maxlength="6" placeholder="••••" autocomplete="current-password"><button type="button" class="btn ghost icon sm eye" id="eye" aria-label="Show PIN">${ic('eye', 17)}</button></div></div>
+          <div class="over" style="color:var(--cu-d)">${greet}</div><h1 style="margin:6px 0 4px">Sign in to Mihir Sales</h1><p class="muted" style="margin-bottom:24px">Use your username (or mobile number) and password.</p>
+          <div class="field"><label for="lphone">Username or mobile</label><input type="text" id="lphone" required placeholder="e.g. priya" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="40" value="${esc(last)}"></div>
+          <div class="field"><label for="lpin">Password</label><div style="position:relative"><input type="password" id="lpin" required maxlength="64" placeholder="Your password" autocomplete="current-password" style="padding-right:44px"><button type="button" class="btn ghost icon sm eye" id="eye" aria-label="Show password">${ic('eye', 17)}</button></div></div>
           <div id="lerr" class="banner warn hide mb-12"></div>
           <button class="btn lg full mt-8" id="lb">Sign in ${ic('arrow')}</button>
-          <p class="xs muted mt-16" style="text-align:center">Forgot your PIN? Your sales manager can reset it from <b>Team</b>.</p>
+          <p class="xs muted mt-16" style="text-align:center">Forgot your password? Your sales manager can reset it from <b>Team</b>.</p>
           <div class="sep"></div>
           <div class="row" style="justify-content:center;gap:6px"><a class="btn ghost sm" href="/kiosk/">${ic('home2', 15)} Reception kiosk</a><a class="btn ghost sm" href="/enquire/">${ic('link', 15)} Customer enquiry</a></div></form></div></div>`;
     const ph = $('lphone'), pin = $('lpin');
-    ph.oninput = () => (ph.value = ph.value.replace(/\D/g, '').slice(-10));
-    pin.oninput = () => (pin.value = pin.value.replace(/\D/g, '').slice(0, 6));
     (last ? pin : ph).focus();
     $('eye').onclick = () => { pin.type = pin.type === 'password' ? 'text' : 'password'; };
     $('lf').onsubmit = async (ev) => {
       ev.preventDefault(); const err = $('lerr'); err.classList.add('hide'); ph.classList.remove('bad'); pin.classList.remove('bad');
-      if (!/^[6-9]\d{9}$/.test(ph.value)) { ph.parentNode.classList.add('bad'); err.textContent = 'Enter your 10-digit mobile number.'; err.classList.remove('hide'); return; }
-      if (pin.value.length < 4) { pin.classList.add('bad'); err.textContent = 'Enter your 4–6 digit PIN.'; err.classList.remove('hide'); return; }
+      const idv = ph.value.trim();
+      if (!idv) { ph.classList.add('bad'); err.textContent = 'Enter your username or mobile number.'; err.classList.remove('hide'); return; }
+      if (pin.value.length < 4) { pin.classList.add('bad'); err.textContent = 'Enter your password.'; err.classList.remove('hide'); return; }
       const bt = $('lb'); bt.disabled = true; bt.textContent = 'Signing in…';
-      try { await api('/api/auth/login', { json: { phone: ph.value, pin: pin.value } }); try { localStorage.setItem('mg_last_phone', ph.value); } catch { /* ignore */ } await boot(); }
+      try { await api('/api/auth/login', { json: { username: idv, password: pin.value } }); try { localStorage.setItem('mg_last_phone', idv); } catch { /* ignore */ } await boot(); }
       catch (e) { err.textContent = e.message; err.classList.remove('hide'); pin.value = ''; pin.focus(); bt.disabled = false; bt.innerHTML = `Sign in ${ic('arrow')}`; }
     };
   }
@@ -869,14 +868,15 @@
     const projs = (sel = []) => `<div class="chips">${t.projects.map((p) => `<label class="chip"><input type="checkbox" name="projectIds" value="${p.id}" ${sel.includes(p.id) ? 'checked' : ''} style="accent-color:var(--navy)"> ${esc(p.name)}</label>`).join('')}</div>`;
     $('view').innerHTML = `<div class="fade-in">${pageHead('Team', 'Staff, projects and channel partners.', `<button class="btn cu" id="addU">${ic('plus')} Add staff</button><button class="btn line" id="addCp">Add channel partner</button>`)}
       <div class="g split">
-        <div class="card">${t.users.map((u) => `<div class="li go" style="margin:0;border-radius:0;padding:14px 18px;border-bottom:1px solid var(--line-2);${u.active ? '' : 'opacity:.5'}" data-u="${u.id}">${avatar(u.name, u.photoUrl)}<div class="grow"><div class="row gap-6"><b>${esc(u.name)}</b><span class="badge plain">${esc(u.role)}</span>${u.role === 'sales' ? `<span class="dot ${slugS(u.status)}" title="${esc(u.status)}"></span>` : ''}</div><div class="xs muted">${esc(u.designation)}${u.employeeId ? ' · ' + esc(u.employeeId) : ''} · ${ph(u.phone)}</div></div><span class="xs muted hide-m">${u.projects.map((p) => esc(p.name)).join(', ')}</span></div>`).join('')}</div>
+        <div class="card">${t.users.map((u) => `<div class="li go" style="margin:0;border-radius:0;padding:14px 18px;border-bottom:1px solid var(--line-2);${u.active ? '' : 'opacity:.5'}" data-u="${u.id}">${avatar(u.name, u.photoUrl)}<div class="grow"><div class="row gap-6"><b>${esc(u.name)}</b><span class="badge plain">${esc(u.role)}</span>${u.role === 'sales' ? `<span class="dot ${slugS(u.status)}" title="${esc(u.status)}"></span>` : ''}</div><div class="xs muted">${u.username ? `<span class="mono">@${esc(u.username)}</span> · ` : ''}${esc(u.designation)}${u.employeeId ? ' · ' + esc(u.employeeId) : ''} · ${ph(u.phone)}</div></div><span class="xs muted hide-m">${u.projects.map((p) => esc(p.name)).join(', ')}</span></div>`).join('')}</div>
         <div class="card"><div class="card-h"><h3>Channel partners</h3></div><div class="card-b"><p class="xs muted mb-12">Leads from a channel partner go straight to its owner; details auto-fill the booking application.</p>
           ${t.channelPartners.map((c) => `<div class="li"><span class="avatar" style="border-radius:12px">${esc(ini(c.name))}</span><div class="grow"><b class="sm">${esc(c.name)}</b><div class="xs muted">${esc(c.reg_code || 'No RERA code')} · ${esc(c.rep_name || '—')}</div></div><span class="xs muted">${esc(c.owner_name || 'Round-robin')}</span></div>`).join('') || '<div class="empty sm">None yet</div>'}</div></div></div></div>`;
     $('addU').onclick = () => modal({ title: 'Add staff', wide: true, body: `<form id="nf"><div class="fgrid">
         <div class="field"><label>Name *</label><input type="text" name="name" required></div><div class="field"><label>Designation</label><input type="text" name="designation"></div>
         <div class="field"><label>Mobile *</label><input type="tel" name="phone" required></div><div class="field"><label>Email</label><input type="email" name="email"></div>
         <div class="field"><label>Employee ID</label><input type="text" name="employeeId"></div><div class="field"><label>Role *</label><select name="role"><option value="sales">Sales</option><option value="reception">Reception</option><option value="manager">Manager</option><option value="accounts">Accounts</option></select></div>
-        <div class="field"><label>Starting PIN *</label><input type="text" name="pin" required inputmode="numeric" maxlength="6"></div></div>
+        <div class="field"><label>Username</label><input type="text" name="username" autocapitalize="none" placeholder="Auto: first name"></div>
+        <div class="field"><label>Starting password *</label><input type="text" name="pin" required maxlength="64" placeholder="8+ characters"></div></div>
         <div class="field"><label>Projects</label>${projs()}</div><div class="row" style="justify-content:flex-end"><button type="button" class="btn line" data-close>Cancel</button><button class="btn cu">Add staff</button></div></form>`,
     onOpen: () => { $('nf').onsubmit = run(async (ev) => { ev.preventDefault(); const fd = new FormData(ev.target); await api('/api/team', { json: { ...Object.fromEntries(fd), projectIds: fd.getAll('projectIds') } }); closeModal(); toast('Staff added'); viewTeam(); }); } });
     $('addCp').onclick = () => modal({ title: 'Channel partner', body: `<form id="cf"><div class="fgrid"><div class="field"><label>Agency name *</label><input type="text" name="name" required></div><div class="field"><label>MahaRERA reg. code</label><input type="text" name="regCode"></div>
@@ -889,7 +889,8 @@
       modal({ title: esc(u.name), sub: `${esc(u.role)} · ${ph(u.phone)}`, wide: true, body: `<form id="ef"><div class="fgrid">
         <div class="field"><label>Name</label><input type="text" name="name" value="${esc(u.name)}"></div><div class="field"><label>Designation</label><input type="text" name="designation" value="${esc(u.designation)}"></div>
         <div class="field"><label>Email</label><input type="email" name="email" value="${esc(u.email)}"></div><div class="field"><label>Employee ID</label><input type="text" name="employeeId" value="${esc(u.employeeId)}"></div>
-        <div class="field"><label>Reset PIN</label><input type="text" name="pin" inputmode="numeric" maxlength="6" placeholder="Leave blank to keep"></div>
+        <div class="field"><label>Username</label><input type="text" name="username" autocapitalize="none" value="${esc(u.username || '')}"></div>
+        <div class="field"><label>Reset password</label><input type="text" name="pin" maxlength="64" placeholder="Leave blank to keep"></div>
         <div class="field"><label>Status</label><select name="active"><option value="1" ${u.active ? 'selected' : ''}>Active</option><option value="0" ${u.active ? '' : 'selected'}>Deactivated</option></select></div></div>
         <div class="field"><label>Projects</label>${projs(u.projects.map((p) => p.id))}</div><div class="row" style="justify-content:flex-end"><button type="button" class="btn line" data-close>Cancel</button><button class="btn cu">Save</button></div></form>`,
       onOpen: () => { $('ef').onsubmit = run(async (ev) => { ev.preventDefault(); const fd = new FormData(ev.target); const body = Object.fromEntries(fd); body.projectIds = fd.getAll('projectIds'); body.active = body.active === '1'; if (!body.pin) delete body.pin; await api(`/api/team/${u.id}`, { method: 'PATCH', json: body }); closeModal(); toast('Saved'); viewTeam(); }); } });
@@ -944,13 +945,13 @@ ${enqLink(null)}
             <div class="row mt-12"><a class="btn wa sm" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(`Hi! Share a few details about the home you're looking for and I'll get back to you with plans and pricing 🏡
 ${enqLink(u)}
 — ${u.name}, ${state.org.name}`)}">${ic('wa', 15)} Share on WhatsApp</a><button class="btn line sm" id="cpE">${ic('copy', 15)} Copy</button><a class="btn ghost sm" target="_blank" rel="noopener" href="${esc(enqLink(u))}">${ic('eye', 15)} Preview</a></div></div>
-          <div class="card p"><h3 class="mb-12">Change PIN</h3><form id="pf" class="fgrid"><div class="field"><label>Current PIN</label><input type="password" name="current" inputmode="numeric" maxlength="6" required></div><div class="field"><label>New PIN</label><input type="password" name="next" inputmode="numeric" maxlength="6" required></div><div><button class="btn">Update PIN</button></div></form></div></div></div></div>`;
+          <div class="card p"><h3>Change password</h3><p class="xs muted mb-12">Sign in as <b class="mono">${esc(u.username || '')}</b> or with your mobile number.</p><form id="pf" class="fgrid"><div class="field"><label>Current password</label><input type="password" name="current" maxlength="64" required autocomplete="current-password"></div><div class="field"><label>New password</label><input type="password" name="next" maxlength="64" required placeholder="8+ characters" autocomplete="new-password"></div><div><button class="btn">Update password</button></div></form></div></div></div></div>`;
     $('vc').innerHTML = MihirCard.html(d); MihirCard.bind($('vc'));
     $('shImg').onclick = run(async () => { const r = await MihirCard.share(d); if (r === 'downloaded') toast('Card image downloaded'); });
     $('cpE').onclick = async () => { try { await navigator.clipboard.writeText(enqLink(u)); toast('Enquiry link copied'); } catch { toast(enqLink(u)); } };
     $('cpL').onclick = async () => { try { await navigator.clipboard.writeText(u.cardUrl); toast('Link copied'); } catch { toast(u.cardUrl); } };
     $('ph').onchange = run(async (ev) => { const fl = ev.target.files[0]; if (!fl) return; const fd = new FormData(); fd.append('photo', await shrink(fl), fl.name); state.user = (await api('/api/me/photo', { method: 'POST', body: fd })).user; shell(); route(); toast('Photo updated'); });
-    $('pf').onsubmit = run(async (ev) => { ev.preventDefault(); await api('/api/me/pin', { json: Object.fromEntries(new FormData(ev.target)) }); ev.target.reset(); toast('PIN changed'); });
+    $('pf').onsubmit = run(async (ev) => { ev.preventDefault(); await api('/api/me/pin', { json: Object.fromEntries(new FormData(ev.target)) }); ev.target.reset(); toast('Password changed'); });
   }
 
   /* ======================= helpers ======================= */

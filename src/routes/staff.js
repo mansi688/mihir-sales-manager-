@@ -20,7 +20,7 @@ const SALES = auth.requireAuth('sales', 'manager');
 
 async function me(u) {
   return {
-    id: u.id, name: u.name, designation: u.designation, employeeId: u.employee_id || '', phone: u.phone, email: u.email, role: u.role, status: u.status, slug: u.slug, active: u.active,
+    id: u.id, username: u.username || '', name: u.name, designation: u.designation, employeeId: u.employee_id || '', phone: u.phone, email: u.email, role: u.role, status: u.status, slug: u.slug, active: u.active,
     photoUrl: u.photo_file_id ? `/media/photos/${u.photo_file_id}` : null, cardUrl: `${config.publicUrl}/card/${u.slug}`, qrUrl: `/card/${u.slug}/qr.png`,
     projects: await all('SELECT p.id, p.name FROM user_projects up JOIN public.projects p ON p.id=up.project_id WHERE up.user_id=? ORDER BY p.name', u.id),
   };
@@ -29,7 +29,7 @@ const reload = async (id) => me(await one('SELECT * FROM users WHERE id=?', id))
 
 /* ---------- Auth & profile ---------- */
 r.post('/api/auth/login', ah(async (req, res) => {
-  const u = await auth.login(req.body?.phone, req.body?.pin);
+  const u = await auth.login(req.body?.username || req.body?.phone, req.body?.password || req.body?.pin);
   if (!u) return res.status(401).json({ error: 'Wrong mobile number or PIN' });
   auth.issue(res, u);
   res.json({ user: await me(u) });
@@ -63,8 +63,8 @@ r.post('/api/me/photo', ANY, uploadPhoto.single('photo'), ah(async (req, res) =>
 
 r.post('/api/me/pin', ANY, ah(async (req, res) => {
   const { current, next } = req.body || {};
-  if (!bcrypt.compareSync(String(current || ''), req.user.pin_hash)) throw httpError(400, 'Current PIN is wrong');
-  if (!/^\d{4,6}$/.test(String(next || ''))) throw httpError(400, 'New PIN must be 4–6 digits');
+  if (!bcrypt.compareSync(String(current || ''), req.user.pin_hash)) throw httpError(400, 'Current password is wrong');
+  if (!auth.validSecret(next)) throw httpError(400, 'Use a password of 8+ characters, or a 4–6 digit PIN');
   await run('UPDATE users SET pin_hash=? WHERE id=?', bcrypt.hashSync(String(next), 10), req.user.id);
   res.json({ ok: true });
 }));
@@ -235,15 +235,25 @@ async function setProjects(userId, ids) {
   for (const pid of ids || []) await run('INSERT INTO user_projects(user_id,project_id) VALUES(?,?) ON CONFLICT DO NOTHING', userId, String(pid));
 }
 
+/** A unique, simple username (letters, digits, . _ -). Explicit names must be free; derived ones get a number. */
+async function usernameFor(wanted, name, strict = !!String(wanted || '').trim()) {
+  let base = String(wanted || '').trim().toLowerCase() || String(name || '').trim().split(/\s+/)[0].toLowerCase().replace(/[^a-z0-9._-]/g, '');
+  if (!/^[a-z][a-z0-9._-]{2,29}$/.test(base)) { if (strict) throw httpError(400, 'Username: 3–30 letters, digits, dot, dash or underscore, starting with a letter'); base = 'user'; }
+  let cand = base; let i = 2;
+  while (await one('SELECT 1 FROM users WHERE lower(username)=?', cand)) { if (strict) throw httpError(409, `Username "${cand}" is taken`); cand = base + i++; }
+  return cand;
+}
+
 r.post('/api/team', MGR, ah(async (req, res) => {
   const { name, designation, phone, email, role, pin, projectIds, employeeId } = req.body || {};
+  const uname = await usernameFor(req.body?.username, name);
   const ph = auth.normalizePhone(phone);
   if (!String(name || '').trim() || !/^91\d{10}$/.test(ph)) throw httpError(400, 'Name and a valid mobile are required');
   if (!['sales', 'reception', 'manager', 'accounts'].includes(role) && !(role === 'admin' && req.user.role === 'admin')) throw httpError(400, 'Choose a role');
-  if (!/^\d{4,6}$/.test(String(pin || ''))) throw httpError(400, 'Starting PIN must be 4–6 digits');
+  if (!auth.validSecret(pin)) throw httpError(400, 'Starting password must be 8+ characters (or a 4–6 digit PIN)');
   if (await one('SELECT 1 FROM users WHERE phone=?', ph)) throw httpError(409, 'A user with this mobile already exists');
-  const u = await one('INSERT INTO users(name,designation,phone,email,role,pin_hash,slug,employee_id) VALUES(?,?,?,?,?,?,?,?) RETURNING id',
-    String(name).trim(), designation || '', ph, email || '', role, bcrypt.hashSync(String(pin), 10), await slugify(String(name)), String(employeeId || '').trim());
+  const u = await one('INSERT INTO users(name,designation,phone,email,role,pin_hash,slug,employee_id,username) VALUES(?,?,?,?,?,?,?,?,?) RETURNING id',
+    String(name).trim(), designation || '', ph, email || '', role, bcrypt.hashSync(String(pin), 10), await slugify(String(name)), String(employeeId || '').trim(), uname);
   await setProjects(u.id, projectIds);
   res.json({ ok: true, id: u.id });
 }));
@@ -254,8 +264,11 @@ r.patch('/api/team/:id', MGR, ah(async (req, res) => {
   const b = req.body || {};
   await run('UPDATE users SET name=coalesce(?,name), designation=coalesce(?,designation), email=coalesce(?,email), employee_id=coalesce(?,employee_id), active=coalesce(?,active) WHERE id=?',
     b.name ?? null, b.designation ?? null, b.email ?? null, b.employeeId ?? null, b.active === undefined ? null : !!b.active, u.id);
+  if (b.username !== undefined && String(b.username).trim() && String(b.username).trim().toLowerCase() !== String(u.username || '').toLowerCase()) {
+    await run('UPDATE users SET username=? WHERE id=?', await usernameFor(b.username, u.name, true), u.id);
+  }
   if (b.pin) {
-    if (!/^\d{4,6}$/.test(String(b.pin))) throw httpError(400, 'PIN must be 4–6 digits');
+    if (!auth.validSecret(b.pin)) throw httpError(400, 'Password must be 8+ characters (or a 4–6 digit PIN)');
     await run('UPDATE users SET pin_hash=? WHERE id=?', bcrypt.hashSync(String(b.pin), 10), u.id);
   }
   if (Array.isArray(b.projectIds)) await setProjects(u.id, b.projectIds);

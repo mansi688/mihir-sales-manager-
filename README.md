@@ -25,15 +25,15 @@ site visit → booking form (real CRM inventory) → KYC → first payment → s
 | Blank originals (print) | `/forms/enquiry.pdf`, `/forms/booking-application.pdf` |
 | Health check | `/health` |
 
-Demo staff (**PIN 1234 — change them on the Team page**):
+Demo staff. Sign in with the **username** (or mobile) and the shared demo password (given to the team privately; it is not stored in this repo). Change it on **My card → Change password**, or reset it from **Team**.
 
-| Role | Mobile | Name |
-|---|---|---|
-| Admin | 9000000001 | Admin |
-| Reception | 9000000002 | Kavita More |
-| Manager (approves bookings) | 9000000003 | Rajesh Nair |
-| Accounts (verifies payments) | 9000000004 | Neha Gupta |
-| Sales | 9822011223 / 9890144556 / 9765477889 / 9970022334 | Ankit / Priya / Rohan / Sneha |
+| Role | Username | Mobile | Name |
+|---|---|---|---|
+| Admin | `admin` | 9000000001 | Admin |
+| Reception | `kavita` | 9000000002 | Kavita More |
+| Manager (approves bookings) | `rajesh` | 9000000003 | Rajesh Nair |
+| Accounts (verifies payments) | `neha` | 9000000004 | Neha Gupta |
+| Sales | `ankit` · `priya` · `rohan` · `sneha` | 9822011223 / 9890144556 / 9765477889 / 9970022334 | Ankit / Priya / Rohan / Sneha |
 
 ## Two experiences
 
@@ -111,7 +111,7 @@ Tests (`npm test`) build a throwaway database on a local Postgres (`TEST_ADMIN_U
 
 ## Going live — checklist
 
-- [ ] Change demo PINs; add real staff and their projects on the Team page.
+- [ ] Change the demo password; add real staff and their projects on the Team page.
 - [ ] Align the kiosk fields (`public/kiosk/kiosk.js`), the booking fields (`public/app/app.js`) and the PDF (`src/services/pdf.js`) with the official Mihir enquiry and booking forms.
 - [ ] **WhatsApp:**
   - Set `WA_MODE=cloud`, `WA_PHONE_NUMBER_ID`, `WA_ACCESS_TOKEN` and `ORG_WHATSAPP`.

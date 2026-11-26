@@ -11,11 +11,17 @@ function normalizePhone(p) {
   return d;
 }
 
-async function login(phone, pin) {
-  const u = await one('SELECT * FROM users WHERE phone=? AND active', normalizePhone(phone));
-  if (!u || !bcrypt.compareSync(String(pin || ''), u.pin_hash)) return null;
+/** Sign in with a username or a mobile number, plus a password or PIN. */
+async function login(id, secret) {
+  const s = String(id || '').trim();
+  const u = /[a-z]/i.test(s)
+    ? await one('SELECT * FROM users WHERE lower(username)=lower(?) AND active', s)
+    : await one('SELECT * FROM users WHERE phone=? AND active', normalizePhone(s));
+  if (!u || !bcrypt.compareSync(String(secret || ''), u.pin_hash)) return null;
   return u;
 }
+/** A 4–6 digit PIN, or a password of 8–64 characters. */
+const validSecret = (v) => /^\d{4,6}$/.test(String(v || '')) || (String(v || '').length >= 8 && String(v || '').length <= 64);
 
 function issue(res, user) {
   const token = jwt.sign({ uid: user.id }, config.jwtSecret, { expiresIn: '12h' });
@@ -51,4 +57,4 @@ function requireKiosk(req, res, next) {
   next();
 }
 
-module.exports = { login, issue, clear, session, requireAuth, requireKiosk, normalizePhone };
+module.exports = { validSecret, login, issue, clear, session, requireAuth, requireKiosk, normalizePhone };
