@@ -208,6 +208,26 @@ const ok = (r, label) => { if (r.status >= 400) { console.error(label, r.status,
   assert.strictEqual((await anon('PUT', `/api/apply/${lt}`, { form: {} })).status, 400); console.log('  ✓ booked application is read-only');
   assert.strictEqual((await anon('GET', '/api/apply/garbage')).status, 410); console.log('  ✓ bad link rejected');
 
+  console.log('Edits, corrections, profile, allotment letter');
+  const ed = ok(await sales('PATCH', `/api/enquiries/${rep.id}`, { email: 'rahul.new@example.com', reason: 'typo' }), 'edit enquiry details');
+  assert.deepStrictEqual(ed.changes, ['Email']); assert.ok(ed.enquiry.activities.some((a) => a.type === 'correction' && /Email/.test(a.note))); console.log('  ✓ edit is logged with the changed field');
+  assert.strictEqual((await sales('PATCH', `/api/enquiries/${rep.id}`, { mobile: '123' })).status, 400); console.log('  ✓ bad mobile rejected');
+  const booked = ok(await mgr('GET', `/api/enquiries/${sub.id}`), 'booked detail').enquiry;
+  const fixed = JSON.parse(JSON.stringify(booked.booking.extra)); fixed.a1.occupation = 'Software Engineer';
+  assert.strictEqual((await sales('PUT', `/api/enquiries/${sub.id}/booking/correct`, { form: fixed, reason: 'x' })).status, 403); console.log('  ✓ sales cannot correct a booked application');
+  assert.strictEqual((await mgr('PUT', `/api/enquiries/${sub.id}/booking/correct`, { form: fixed })).status, 400); console.log('  ✓ reason required after booking');
+  const cr = ok(await mgr('PUT', `/api/enquiries/${sub.id}/booking/correct`, { form: fixed, reason: 'Customer updated occupation' }), 'manager corrects booked application');
+  assert.ok(cr.changes.includes('First applicant — Occupation')); assert.strictEqual(cr.enquiry.booking.extra.a1.occupation, 'Software Engineer');
+  assert.strictEqual(cr.enquiry.booking.extra.unit, booked.booking.extra.unit, 'unit stays fixed');
+  assert.notStrictEqual(cr.enquiry.booking.pdf_file_id, booked.booking.pdf_file_id); console.log('  ✓ signed PDF re-issued after correction');
+  assert.strictEqual((await mgr('GET', `/api/enquiries/${sub.id}/booking.pdf`)).status, 200);
+  assert.strictEqual((await mgr('GET', `/api/enquiries/${sub.id}/allotment.pdf`)).status, 200); console.log('  ✓ allotment letter (MahaRERA format)');
+  assert.strictEqual((await sales('GET', `/api/enquiries/${rep.id}/allotment.pdf`)).status, 400); console.log('  ✓ no allotment letter before payment');
+  const al = ok(await mgr('GET', `/api/enquiries/${sub.id}/allotment-link`), 'allotment link');
+  assert.strictEqual((await anon('GET', al.url.replace(/^https?:\/\/[^/]+/, ''))).status, 200); console.log('  ✓ customer opens allotment letter');
+  const prof = ok(await sales('GET', `/api/enquiries/${rep.id}/profile`), 'customer profile'); assert.ok(prof.others.some((o) => o.id === sub.id)); console.log('  ✓ profile links other enquiries');
+  const list = ok(await mgr('GET', '/api/enquiries'), 'forms register'); const row = list.enquiries.find((x) => x.id === sub.id); assert.ok(row.has_booking && row.has_paid);
+
   console.log('Reassign & cards');
   const other = board.team.find((t) => t.name !== cp.sales.name);
   ok(await desk('POST', `/api/enquiries/${cp.id}/reassign`, { userId: other.id, reason: 'Customer asked for someone else' }), 'reception reassign');

@@ -13,7 +13,8 @@ const wf = require('../services/workflow');
 const wa = require('../services/whatsapp');
 const BF = require('../content/booking-form');
 const EO = require('../content/enquiry-options');
-const { bookingPdf, enquiryPdf } = require('../services/pdf');
+const { bookingPdf, enquiryPdf, allotmentPdf } = require('../services/pdf');
+const { getFile } = require('../db');
 const { ah, httpError } = require('../util');
 
 const r = express.Router();
@@ -114,6 +115,22 @@ r.get('/api/apply/:token/application.pdf', ah(async (req, res) => {
   const full = await wf.fullEnquiry(e.id);
   const pdf = await bookingPdf({ enquiry: full, booking: { ...(booking || {}), extra: { ...((booking && booking.extra) || {}), ...form } }, payment: null, signatures: {}, draft: full.stage !== 'Booked' });
   pdfOut(res, `Booking Application ${e.id}.pdf`, pdf, req.query.download);
+}));
+
+/* ---------- allotment letter link for the customer ---------- */
+r.get('/api/enquiries/:id/allotment-link', ANY, ah(async (req, res) => {
+  const e = await wf.getEnquiry(req.params.id);
+  if (!e) throw httpError(404, 'Enquiry not found');
+  if (req.user.role === 'sales' && e.assigned_to !== req.user.id) throw httpError(403, 'This customer is assigned to someone else');
+  await logActivity(e.id, req.user.id, 'allotment_sent', 'Allotment letter shared with the customer');
+  res.json({ url: `${config.publicUrl}/al/${sign({ al: e.id }, 30)}` });
+}));
+r.get('/al/:token', ah(async (req, res) => {
+  let id; try { id = jwt.verify(req.params.token, config.jwtSecret).al; } catch { return res.status(410).send('This link has expired. Please ask your relationship manager for a new one.'); }
+  const full = id && await wf.fullEnquiry(id);
+  if (!full || !full.booking || !full.payments.some((p) => p.status === 'Received')) return res.status(404).send('Allotment letter not available');
+  const sig = full.signatures.developer; const f = sig ? await getFile(sig.file_id) : null; const dev = sig ? await one('SELECT name, designation FROM users WHERE id=?', sig.signed_by) : null;
+  pdfOut(res, `Allotment Letter ${full.id}.pdf`, await allotmentPdf({ enquiry: full, booking: full.booking, payments: full.payments, developer: f ? { image: f.data, ...dev } : null }), req.query.download);
 }));
 
 /* ---------- filled enquiry form for the customer ---------- */

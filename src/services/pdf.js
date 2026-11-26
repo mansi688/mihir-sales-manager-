@@ -131,7 +131,8 @@ function bookingPdf({ enquiry, booking, payment, signatures, draft, blank }) {
       ['Carpet Area (Sq. M. / Sq. Ft.)', [form.carpetSqm && `${form.carpetSqm} sq m`, form.carpetSqft && `${form.carpetSqft} sq ft`].filter(Boolean).join(' / ')],
       ['Exclusive / Other Area (if applicable)', form.exclusiveArea], ['Parking Details', form.parking], ['Possession Date', dmy(form.possession)],
       ['Total Agreement Value', rs(form.agreementValue)], ['Other Applicable Charges', rs(form.otherCharges)],
-      ['Total Consideration Value', rs(form.totalConsideration)],
+      ['Total Consideration Value', rs(form.totalConsideration)], ['Encumbrances on the Unit', blank ? '' : form.encumbrances || 'None'],
+      ['RERA Designated Collection A/c', blank ? '' : [form.collBank, form.collAccount && 'A/c ' + form.collAccount, form.collIfsc && 'IFSC ' + form.collIfsc].filter(Boolean).join(' · ')],
     ]);
 
     section(4, 'First Transaction / Booking Payment Details');
@@ -390,4 +391,73 @@ function quotationPdf({ q, enquiry, rm }) {
   });
 }
 
-module.exports = { bookingPdf, enquiryPdf, quotationPdf };
+/* ---------- Allotment letter (MahaRERA model format) — issued against the booking amount ---------- */
+function allotmentPdf({ enquiry, booking, payments, developer }) {
+  const f = booking.extra || {}; const a1 = f.a1 || {}; const a2 = f.a2 || {};
+  const received = (payments || []).filter((p) => p.status === 'Received');
+  const paid = received.reduce((t, p) => t + Number(p.amount), 0);
+  const total = Number(booking.total_consideration) || 0;
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: 'A4', margins: { top: M, bottom: 30, left: M, right: M }, bufferPages: true, info: { Title: `Allotment Letter ${enquiry.id}`, Author: config.org.name } });
+    const chunks = []; doc.on('data', (c) => chunks.push(c)); doc.on('end', () => resolve(Buffer.concat(chunks))); doc.on('error', reject);
+    const top = () => { doc.image(LOGO, M, 26, { height: 40 }); doc.font('Helvetica').fontSize(7.5).fillColor(MUTED).text(`Allotment ${enquiry.id}  ·  ${config.org.name}  ·  ${config.org.website}`, M, 40, { width: W, align: 'right' }); doc.moveTo(M, 74).lineTo(M + W, 74).lineWidth(1.2).strokeColor(COPPER).stroke(); doc.y = 86; };
+    const space = (h) => { if (doc.y + h > BOTTOM) { doc.addPage(); top(); } };
+    const head = (t) => { space(40); doc.moveDown(0.5); const y = doc.y; doc.roundedRect(M, y, W, 19, 3).fill(NAVY2); doc.font('Helvetica-Bold').fontSize(9).fillColor('#fff').text(t.toUpperCase(), M + 9, y + 6, { characterSpacing: 0.4 }); doc.y = y + 25; };
+    const rows = (list) => {
+      for (const [k, v] of list) {
+        doc.font('Helvetica-Bold').fontSize(8.8); const val = T(v === undefined || v === null || v === '' ? '—' : v);
+        const h = Math.max(16, doc.heightOfString(val, { width: W * 0.6 - 10 }) + 8); space(h); const y = doc.y;
+        doc.font('Helvetica').fillColor(MUTED).text(k, M + 5, y + 4, { width: W * 0.4 - 10 });
+        doc.font('Helvetica-Bold').fillColor('#1d1f2e').text(val, M + W * 0.4 + 5, y + 4, { width: W * 0.6 - 10 });
+        doc.moveTo(M, y + h).lineTo(M + W, y + h).lineWidth(0.5).strokeColor(LINE).stroke(); doc.y = y + h;
+      }
+      doc.y += 4;
+    };
+    const para = (t, o = {}) => { doc.font(o.bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(o.size || 9).fillColor(o.color || '#2a2c3a'); space(doc.heightOfString(T(t), { width: W }) + 6); doc.text(T(t), M, doc.y, { width: W, align: o.align || 'left' }); doc.y += 5; };
+
+    top();
+    doc.font('Helvetica-Bold').fontSize(17).fillColor(NAVY).text('ALLOTMENT LETTER', M, doc.y + 2, { width: W });
+    doc.font('Helvetica').fontSize(8).fillColor(MUTED).text('As per the MahaRERA model format  ·  issued against the booking amount', { characterSpacing: 0.6 }); doc.y += 8;
+    doc.font('Helvetica').fontSize(9).fillColor('#2a2c3a');
+    doc.text(`Ref: ${enquiry.id}`, M, doc.y); doc.text(`Date: ${ist(received[0] ? received[0].verified_at || received[0].txn_date || received[0].submitted_at : new Date())}`, M, doc.y - 11, { width: W, align: 'right' }); doc.y += 8;
+    para(`To,\n${[a1.name, a2.name].filter(Boolean).join(' & ')}\n${[a1.address, a1.city, a1.pin].filter(Boolean).join(', ')}\nMobile: ${fmtPhone(a1.mobile || enquiry.mobile)}${a1.email ? '  ·  ' + a1.email : ''}`);
+    para(`Subject: Allotment of Flat ${booking.unit} in ${f.project || enquiry.project_name}${f.reraNo ? ` (MahaRERA Reg. No. ${f.reraNo})` : ''}`, { bold: true, color: NAVY });
+    para(`Dear ${String(a1.name || enquiry.name).split(' ')[0]},\nWe are pleased to confirm the allotment of the unit described below in your favour, against the booking amount received, on the terms set out in this letter. The Agreement for Sale shall be executed and registered as per the Real Estate (Regulation and Development) Act, 2016, and the Maharashtra rules.`);
+
+    head('1. Unit details');
+    rows([['Project', f.project || enquiry.project_name], ['MahaRERA Registration No.', f.reraNo], ['Building / Tower · Wing', [booking.tower, booking.wing].filter(Boolean).join(' · ')], ['Flat / Unit No. · Floor', `${booking.unit}${booking.floor ? ' · Floor ' + booking.floor : ''}`],
+      ['Configuration', f.config || enquiry.config], ['RERA Carpet Area', [f.carpetSqm && `${f.carpetSqm} sq m`, f.carpetSqft && `${f.carpetSqft} sq ft`].filter(Boolean).join(' / ')], ['Exclusive / Other Area', f.exclusiveArea], ['Parking Allotted', f.parking || 'None'],
+      ['Possession Date (as per RERA)', dmy(f.possession)], ['Encumbrances on the Unit', f.encumbrances || 'None']]);
+    head('2. Price and amount received');
+    rows([['Total Agreement Value', rs(f.agreementValue)], ['Other Applicable Charges', rs(f.otherCharges)], ['Total Price', rs(total)],
+      ['Booking amount received', `${rs(paid)}${total ? ` (${((paid / total) * 100).toFixed(2)}% of total price)` : ''}`], ['In words', BF.amountInWords(paid)],
+      ...received.map((p) => [`Receipt ${p.receipt_no || ''}`.trim(), `${rs(p.amount)} · ${p.mode} · ${p.ref || ''} · ${ist(p.txn_date || p.submitted_at)}`])]);
+    para('As required by Section 13 of RERA, the amount received does not exceed 10% of the total price. No further amount shall be demanded before the Agreement for Sale is executed and registered.', { size: 8.2, color: MUTED });
+    head('3. Payment milestones (Construction Linked Payment Plan)');
+    rows((f.clp || []).map((r, i) => [`${i + 1}. ${r.milestone}`, `${r.pct}%${r.amount ? '  ·  ' + rs(r.amount) : ''}${r.due ? '  ·  due ' + dmy(r.due) : ''}`]));
+    head('4. RERA designated collection bank account');
+    rows([['Bank & Branch', f.collBank], ['Account No.', f.collAccount], ['IFSC', f.collIfsc]]);
+    para("All further payments shall be made only to this account, in line with MahaRERA's three-account framework (Order No. 56/2024; proformas under Order No. 60/2024).", { size: 8.2, color: MUTED });
+    head('5. Cancellation by the allottee (developer not in default)');
+    rows(BF.RERA_SLABS.map(([a, b]) => [a, b]));
+    para('The balance amount after the permissible deduction shall be refunded within 45 days of receipt of the written cancellation request. Delayed refunds carry interest at SBI highest MCLR + 2%. Any deviation from the MahaRERA model allotment letter is disclosed in the deviation report, with the allottee\'s consent.', { size: 8.4 });
+    head('6. Other terms');
+    BF.TERMS.slice(0, 9).forEach((t, i) => para(`${i + 1}. ${t}`, { size: 8.2 }));
+
+    space(140); doc.y += 10; const y = doc.y; const half = (W - 30) / 2;
+    doc.font('Helvetica-Bold').fontSize(9).fillColor(NAVY2).text(`For ${config.org.name}`, M, y);
+    if (developer && developer.image) { try { doc.image(developer.image, M, y + 14, { fit: [160, 56] }); } catch { /* ignore bad image */ } }
+    doc.moveTo(M, y + 76).lineTo(M + half, y + 76).lineWidth(0.6).strokeColor('#9C9586').stroke();
+    doc.font('Helvetica').fontSize(8.5).fillColor('#2a2c3a').text(developer && developer.name ? `${developer.name}, ${developer.designation || 'Authorised Signatory'}` : 'Authorised Signatory', M, y + 80, { width: half });
+    doc.font('Helvetica-Bold').fontSize(9).fillColor(NAVY2).text('Accepted by the Allottee(s)', M + half + 30, y);
+    doc.moveTo(M + half + 30, y + 76).lineTo(M + W, y + 76).stroke();
+    doc.font('Helvetica').fontSize(8.5).fillColor('#2a2c3a').text([a1.name, a2.name].filter(Boolean).join(' & ') || enquiry.name, M + half + 30, y + 80, { width: half });
+
+    const range = doc.bufferedPageRange();
+    for (let i = 0; i < range.count; i++) { doc.switchToPage(i); doc.page.margins.bottom = 0; doc.font('Helvetica').fontSize(7).fillColor(MUTED).text(`${config.org.name} · Allotment Letter ${enquiry.id} · Page ${i + 1} of ${range.count}`, M, 841.89 - 30, { width: W, align: 'center' }); }
+    doc.end();
+  });
+}
+
+module.exports = { bookingPdf, enquiryPdf, quotationPdf, allotmentPdf };
+

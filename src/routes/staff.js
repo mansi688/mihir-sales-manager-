@@ -8,7 +8,7 @@ const wf = require('../services/workflow');
 const { crm, inventory } = require('../services/integrations');
 const BF = require('../content/booking-form');
 const EO = require('../content/enquiry-options');
-const { bookingPdf, enquiryPdf } = require('../services/pdf');
+const { bookingPdf, enquiryPdf, allotmentPdf } = require('../services/pdf');
 const { ah, httpError, uploadDoc, uploadPhoto, pngFromDataUrl, todayStartUtc } = require('../util');
 
 const r = express.Router();
@@ -86,7 +86,10 @@ r.get('/api/enquiries', ANY, ah(async (req, res) => {
   res.json({
     enquiries: await all(`SELECT e.*, p.name project_name, u.name assigned_name,
         (SELECT min(f.due_at) FROM followups f WHERE f.enquiry_id=e.id AND f.done_at IS NULL) next_followup,
-        (SELECT max(a.at) FROM activities a WHERE a.enquiry_id=e.id) last_activity FROM enquiries e
+        (SELECT max(a.at) FROM activities a WHERE a.enquiry_id=e.id) last_activity,
+        EXISTS(SELECT 1 FROM bookings b WHERE b.enquiry_id=e.id) has_booking,
+        EXISTS(SELECT 1 FROM payments py WHERE py.enquiry_id=e.id AND py.status='Received') has_paid,
+        EXISTS(SELECT 1 FROM customer_forms cf WHERE cf.enquiry_id=e.id) customer_form FROM enquiries e
       JOIN public.projects p ON p.id=e.project_id LEFT JOIN users u ON u.id=e.assigned_to
       ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY e.created_at DESC LIMIT 1000`, ...args),
   });
@@ -103,10 +106,19 @@ r.post('/api/enquiries/:id/notes', ANY, act((e, req) => {
   return wf.addNote(e, req.user, String(req.body.note).trim().slice(0, 1000));
 }));
 r.put('/api/enquiries/:id/booking', SALES, act((e, req) => wf.saveBooking(e, req.user, req.body || {})));
+r.put('/api/enquiries/:id/booking/correct', SALES, ah(async (req, res) => {
+  const e = await load(req); const out = await wf.correctBooking(e, req.user, req.body || {});
+  res.json({ changes: out.changes, enquiry: await wf.fullEnquiry(e.id) });
+}));
+r.patch('/api/enquiries/:id', SALES, ah(async (req, res) => {
+  const e = await load(req); const out = await wf.updateEnquiry(e, req.user, req.body || {});
+  res.json({ changes: out.changes, enquiry: await wf.fullEnquiry(e.id) });
+}));
+r.get('/api/enquiries/:id/profile', ANY, ah(async (req, res) => { const e = await load(req); res.json(await wf.customerProfile(e)); }));
 r.get('/api/enquiries/:id/application.pdf', ANY, ah(async (req, res) => {
   const e = await load(req);
   const pdf = await wf.previewPdf(e);
-  res.set('Content-Disposition', `inline; filename="Booking Application ${e.id}.pdf"`).type('application/pdf').send(pdf);
+  res.set('Content-Disposition', `${req.query.download ? 'attachment' : 'inline'}; filename="Booking Application ${e.id}.pdf"`).type('application/pdf').send(pdf);
 }));
 r.post('/api/enquiries/:id/kyc', SALES, uploadDoc.single('file'), act((e, req) => {
   const kind = String(req.body?.kind || '');
@@ -137,7 +149,15 @@ r.get('/api/enquiries/:id/booking.pdf', ANY, ah(async (req, res) => {
   const b = await one('SELECT pdf_file_id FROM bookings WHERE enquiry_id=?', e.id);
   const f = b && b.pdf_file_id ? await getFile(b.pdf_file_id) : null;
   if (!f) throw httpError(404, 'Booking PDF not generated yet');
-  res.set('Content-Disposition', `inline; filename="${f.name}"`).type('application/pdf').send(f.data);
+  res.set('Content-Disposition', `${req.query.download ? 'attachment' : 'inline'}; filename="${f.name}"`).type('application/pdf').send(f.data);
+}));
+r.get('/api/enquiries/:id/allotment.pdf', ANY, ah(async (req, res) => {
+  const e = await load(req); const full = await wf.fullEnquiry(e.id);
+  if (!full.booking) throw httpError(400, 'Save the booking application first');
+  if (!full.payments.some((p) => p.status === 'Received')) throw httpError(400, 'The allotment letter is issued once Accounts verify the booking amount');
+  const sig = full.signatures.developer; const f = sig ? await getFile(sig.file_id) : null; const dev = sig ? await one('SELECT name, designation FROM users WHERE id=?', sig.signed_by) : null;
+  const pdf = await allotmentPdf({ enquiry: full, booking: full.booking, payments: full.payments, developer: f ? { image: f.data, ...dev } : null });
+  res.set('Content-Disposition', `${req.query.download ? 'attachment' : 'inline'}; filename="Allotment Letter ${e.id}.pdf"`).type('application/pdf').send(pdf);
 }));
 r.get('/api/enquiries/:id/share-link', ANY, ah(async (req, res) => {
   const e = await load(req);

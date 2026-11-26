@@ -22,6 +22,7 @@ site visit → booking form (real CRM inventory) → KYC → first payment → s
 | Landing page (first page) | `/` — customers, staff login and kiosk entry points |
 | **Customer fills the booking application** | `/apply/?t=<token>`. Sent from the customer page via **Send form link**; valid 14 days |
 | Customer's filled enquiry form (print/PDF) | `/f/<token>`. Shown after enquiring online or at the kiosk |
+| Allotment letter for a customer (MahaRERA format) | `/al/<token>`. Sent from the **Booking payment** step once Accounts verify the payment |
 | Blank originals (print) | `/forms/enquiry.pdf`, `/forms/booking-application.pdf` |
 | Health check | `/health` |
 
@@ -47,6 +48,20 @@ Demo staff. Sign in with the **username** (or mobile) and the shared demo passwo
 
 Design: Inter for body text and Manrope for headings. Colours: indigo for brand and headings, copper for highlights,
 aqua for buttons and links, pale aqua for enquiry sections, warm ivory for the background (`public/assets/styles.css`).
+
+## Customer profile & corrections
+
+- **Customer profile:** every customer page has **Journey** and **Customer profile** views. The profile shows:
+  - contact and interest;
+  - both applicants (PAN, Aadhaar and account numbers masked);
+  - financing and the booked unit (paid and balance);
+  - every filled form, printable, plus KYC, payments and other enquiries from the same mobile.
+- **Edit details:** sales (their own customers), managers and admin can fix the enquiry details.
+- **Booking application:**
+  - **Before submission:** edit freely.
+  - **After submission:** use **Edit / correct application**. The flat stays fixed, and every changed field is logged with the user's name.
+  - **After approval:** only a manager or admin can correct it, a reason is required, and the signed PDF is re-issued.
+- **Allotment letter:** generated in the MahaRERA model format once the booking amount (≤ 10%) is verified. It includes the MahaRERA number, unit and carpet area, parking, price, possession date, payment milestones, encumbrances, the RERA designated collection account, and the cancellation slabs with the 45-day refund.
 
 ## How the day works
 

@@ -441,8 +441,11 @@
           ${can.sell() && !['Booked', 'Lost'].includes(e.stage) ? `<button class="btn line sm" id="bQt">${ic('quote', 16)} Quotation</button>` : ''}
           ${can.desk() && !['Booked', 'Lost'].includes(e.stage) ? '<button class="btn line sm" id="bRe">Reassign</button>' : ''}
           ${can.sell() && !['Booked', 'Lost'].includes(e.stage) ? '<button class="btn danger sm" id="bLost">Mark lost</button>' : ''}</div></div>
+        <div class="row spread mt-16" style="align-items:center"><div class="seg" id="cv"><button data-v="journey" class="${state.custView !== 'profile' ? 'on' : ''}">${ic('bolt', 15)} Journey</button><button data-v="profile" class="${state.custView === 'profile' ? 'on' : ''}">${ic('team', 15)} Customer profile</button></div>
+          ${can.sell() ? `<button class="btn ghost sm" id="bEdit">${ic('sign', 15)} Edit details</button>` : ''}</div>
         ${e.stage === 'Lost' ? '<div class="banner warn mt-16">This enquiry was marked lost.</div>' : `<div class="track">${S.filter((s) => s !== 'Lost').map((s, i) => `<span class="${i < pct ? 'done' : i === pct ? 'cur' : ''}" title="${s}"></span>`).join('')}</div>`}</div>
-      <div class="journey">
+      <div id="profileV" class="${state.custView === 'profile' ? '' : 'hide'}"></div>
+      <div class="journey ${state.custView === 'profile' ? 'hide' : ''}" id="journeyV">
         <div class="card steps">${JSTEPS.map((st, i) => { const s = status(st); return `<div class="step ${s} ${selStep === st.k ? 'sel' : ''}" data-s="${st.k}"><span class="n">${s === 'done' ? ic('check', 16) : s === 'lock' ? ic('lock', 14) : i + 1}</span><div><b>${st.t}</b><small>${s === 'done' ? 'Completed' : s === 'cur' ? 'Next up' : 'Locked'}</small></div></div>`; }).join('')}</div>
         <div class="stack gap-14"><div class="card p" id="panel"></div>
           <div class="card"><div class="card-h"><div class="seg" id="tabs" style="overflow-x:auto;max-width:100%"><button class="on" data-t="act">Activity</button><button data-t="fu">Follow-ups${e.followups.filter((f) => !f.done_at).length ? ` <span class="badge cu" style="padding:0 7px">${e.followups.filter((f) => !f.done_at).length}</span>` : ''}</button><button data-t="qt">Quotes${e.quotations.length ? ` <span class="badge plain" style="padding:0 7px">${e.quotations.length}</span>` : ''}</button><button data-t="det">Details</button><button data-t="sync">CRM</button></div></div><div class="card-b" id="tabb"></div></div></div>
@@ -463,6 +466,9 @@
     onOpen: () => { let r = ''; qsa('#lr .chip').forEach((c) => (c.onclick = () => { r = c.dataset.v; qsa('#lr .chip').forEach((x) => x.classList.toggle('on', x === c)); })); $('ok').onclick = run(async () => { await post('lost', { reason: [r, $('ln').value].filter(Boolean).join(' — ') }); closeModal(); toast('Marked lost'); re(); }); } });
 
     if ($('bFu')) $('bFu').onclick = () => openFollowup(e, re);
+    if ($('bEdit')) $('bEdit').onclick = () => editEnquiry(e, re);
+    qsa('#cv button').forEach((bn) => (bn.onclick = () => { state.custView = bn.dataset.v; qsa('#cv button').forEach((x) => x.classList.toggle('on', x === bn)); $('profileV').classList.toggle('hide', bn.dataset.v !== 'profile'); $('journeyV').classList.toggle('hide', bn.dataset.v === 'profile'); if (bn.dataset.v === 'profile') drawProfile(e, re); }));
+    if (state.custView === 'profile') drawProfile(e, re);
     if ($('bQt')) $('bQt').onclick = run(() => openQuote(e, re));
     const drawTab = (t) => {
       if (t === 'fu') {
@@ -519,7 +525,7 @@
           ${e.customerForm && e.customerForm.submitted_at ? `<div class="banner ok mb-16">${ic('check')}<span><b>${esc(first(e.name))} filled their details online</b> ${when(e.customerForm.submitted_at)} — applicants, address, bank and loan are pre-filled. Choose the flat and cost sheet to finish.</span></div>`
             : e.customerForm ? `<div class="banner info mb-16">${ic('clock')}<span>${esc(first(e.name))} has started filling the application online (saved ${when(e.customerForm.updated_at)}).</span></div>` : ''}
           ${linkCard}
-          <div class="row"><button class="btn cu lg" id="bApp">${ic('doc')} ${e.booking ? (e.stage === 'Booked' || !sell ? 'View application' : 'Continue application') : 'Start booking application'}</button>
+          <div class="row"><button class="btn cu lg" id="bApp">${ic('doc')} ${e.booking ? (!sell || (e.stage === 'Booked' && !can.approve()) ? 'View application' : submitted ? 'Edit / correct application' : 'Continue application') : 'Start booking application'}</button>
           ${e.booking ? `<a class="btn line" target="_blank" rel="noopener" href="/api/enquiries/${e.id}/application.pdf">${ic('print', 16)} Print / PDF</a>` : ''}</div>`);
         if ($('bApp')) $('bApp').onclick = run(() => openWizard(e, re));
         const mkLink = async () => (await api(`/api/enquiries/${id}/apply-link`, { method: 'POST' })).url;
@@ -540,6 +546,7 @@
         Pn.innerHTML = head('pay', 'Booking payment', 'First transaction — Accounts verify it against the bank statement.') + (s === 'lock' ? lockNote('Complete KYC first.') : `
           ${cap ? `<div class="banner cu mb-16">${ic('stamp')}<span>RERA: before the Agreement for Sale the booking amount can be at most <b>${inr(cap)}</b> (10% of ${inr(b.total_consideration)}). Collect only into the project's RERA designated account.</span></div>` : ''}
           ${e.payments.map((p) => `<div class="doc-row ${p.status === 'Received' ? 'ok' : ''}"><span class="ico">${ic(p.status === 'Received' ? 'check' : p.status === 'Rejected' ? 'x' : 'clock')}</span><div class="grow"><b>${inr(p.amount)}</b> <span class="sm muted">· ${esc(p.mode)} · <span class="mono">${esc(p.ref || '—')}</span></span><div class="xs muted">${esc(p.bank_name || '')} ${esc(p.branch || '')} ${p.txn_date ? '· ' + day(p.txn_date) : ''} ${p.remarks ? '· ' + esc(p.remarks) : ''}</div></div>${p.status === 'Received' ? `<span class="badge ok">${esc(p.receipt_no)}</span>` : p.status === 'Rejected' ? '<span class="badge bad">Rejected</span>' : '<span class="badge warn">With Accounts</span>'}</div>`).join('')}
+          ${paid ? `<div class="row mt-12"><a class="btn line sm" target="_blank" rel="noopener" href="/api/enquiries/${e.id}/allotment.pdf">${ic('stamp', 15)} Allotment letter (MahaRERA format)</a><button class="btn wa sm" id="bAllotWa">${ic('wa', 15)} Send to customer</button></div>` : ''}
           ${paid || !sell ? '' : pending ? `<div class="banner info">${ic('clock')}<span>Waiting for Accounts to verify. You'll be notified on WhatsApp when it's done.</span></div>` : `<div class="fgrid mt-12">
             <div class="field"><label>Booking amount (₹) <span class="req">*</span></label><input type="text" id="pyA" inputmode="numeric" value="${esc(bookAmt || '')}"><span class="hint" id="pyW"></span></div>
             <div class="field"><label>Transaction date <span class="req">*</span></label><input type="date" id="pyD" value="${new Date().toISOString().slice(0, 10)}"></div>
@@ -549,6 +556,7 @@
             <div class="field"><label>Branch</label><input type="text" id="pyBr" value="${esc((form.a1 && form.a1.branch) || '')}"></div></div>
             <button class="btn cu" id="bPay">${ic('arrow')} Send to Accounts</button>`}`);
         if ($('pyA') && cap) { const w = () => { const v = Number($('pyA').value.replace(/[^\d.]/g, '')); $('pyW').textContent = v ? (v > cap ? `Above the RERA limit of ${inr(cap)}` : `${inr(v)} · ${((v / b.total_consideration) * 100).toFixed(1)}% of total`) : ''; $('pyW').style.color = v > cap ? 'var(--bad)' : ''; }; $('pyA').oninput = w; w(); }
+        if ($('bAllotWa')) $('bAllotWa').onclick = run(async () => { const { url } = await api(`/api/enquiries/${id}/allotment-link`); window.open(`https://wa.me/91${e.mobile}?text=${encodeURIComponent(`Hi ${first(e.name)}, here is your allotment letter for ${b.unit} at ${e.project_name}: ${url}`)}`, '_blank', 'noopener'); });
         if ($('bPay')) $('bPay').onclick = run(async () => { await post('payments', { amount: $('pyA').value, mode: $('pyM').value, ref: $('pyR').value, txnDate: $('pyD').value, bankName: $('pyB').value, branch: $('pyBr').value }); toast('Sent to Accounts'); re(); });
       } else if (selStep === 'sign') {
         const a1 = (form.a1 && form.a1.name) || e.name;
@@ -580,7 +588,8 @@
   async function openWizard(e, onDone) {
     if (!state.form) state.form = await api('/api/booking-form');
     const F = state.form; const b = e.booking || {};
-    const ro = ['Booked', 'Lost'].includes(e.stage) || !can.sell();
+    const ro = e.stage === 'Lost' || !can.sell() || (e.stage === 'Booked' && !can.approve());
+    const corr = !ro && state.stages.indexOf(e.stage) >= state.stages.indexOf('KYC'); // submitted: corrections only, flat fixed
     const cf = (e.customerForm && e.customerForm.data) || {}; const f = JSON.parse(JSON.stringify(b.extra || cf)); f.a1 = f.a1 || {}; f.a2 = f.a2 || {};
     if (!b.extra) { const seed = { name: e.name.toUpperCase(), mobile: e.mobile, email: e.email, address: e.residence, nationality: 'Indian' }; Object.keys(seed).forEach((k) => { if (!f.a1[k]) f.a1[k] = seed[k]; }); f.funding = f.funding || 'Self-Funded'; f.cpName = e.cp_name || ''; f.smName = e.assigned_name || ''; f.smPhone = e.assigned_phone ? '+' + e.assigned_phone : ''; }
     if (!f.clp || !f.clp.length) f.clp = F.defaultClp.map((r) => ({ ...r, due: '' }));
@@ -599,8 +608,8 @@
         ${s.fields.filter((fd) => !fd.only || fd.only === who).map((fd) => input(who === 'a2' ? { ...fd, req: false } : fd, `${who}.${fd.k}`, f[who][fd.k] ?? (fd.def && who === 'a1' ? fd.def : ''))).join('')}</div>`).join('')}</div>
         ${(s.extra || []).map((fd) => input(fd, fd.k, f[fd.k])).join('')}${s.note ? `<p class="xs muted">${esc(s.note)}</p>` : ''}`;
       if (s.kind === 'flat') return `<div class="fgrid"><div class="field"><label>Project</label><input type="text" value="${esc(e.project_name)}" disabled></div>
-          <div class="field"><label>Building / Tower · Wing <span class="req">*</span></label><select id="uT" ${ro ? 'disabled' : ''}><option>Loading…</option></select></div>
-          <div class="field"><label>Flat / Unit <span class="req">*</span></label><select id="uU" ${ro ? 'disabled' : ''}><option value="">—</option></select></div></div>
+          <div class="field"><label>Building / Tower · Wing <span class="req">*</span></label><select id="uT" ${ro || corr ? 'disabled' : ''}><option>Loading…</option></select></div>
+          <div class="field"><label>Flat / Unit <span class="req">*</span></label><select id="uU" ${ro || corr ? 'disabled' : ''}><option value="">—</option></select></div></div>
         <div class="unit mb-16" id="uCard"></div><div class="fgrid">${s.fields.map((fd) => input(fd, fd.k, f[fd.k])).join('')}</div>
         <div class="total"><span class="b">Total consideration value</span><b class="num" id="tot">—</b></div>`;
       if (s.kind === 'payment') { const p = e.payments.find((x) => x.status !== 'Rejected'); return p ? `<dl class="kv"><dt>Booking amount</dt><dd>${inr(p.amount)}</dd><dt>Date</dt><dd>${day(p.txn_date || p.submitted_at)}</dd><dt>Mode</dt><dd>${esc(p.mode)}</dd><dt>Cheque / UTR</dt><dd class="mono">${esc(p.ref)}</dd><dt>Bank / branch</dt><dd>${esc(p.bank_name || '—')} ${esc(p.branch || '')}</dd><dt>Status</dt><dd>${esc(p.status)} ${p.receipt_no ? '· ' + esc(p.receipt_no) : ''}</dd></dl>` : `<div class="banner info">${ic('rupee')}<span>Recorded after the application is submitted and KYC is complete (journey step 5). It then appears here and on the printed application, with the amount in words.</span></div>`; }
@@ -616,13 +625,13 @@
 
     closeAll(); document.body.style.overflow = 'hidden';
     const w = document.createElement('div'); w.className = 'wiz'; w.id = 'wiz';
-    w.innerHTML = `<div class="wiz-h"><img src="/assets/logo.png" alt=""><div class="grow"><h3>Booking application</h3><div class="xs muted">${e.id} · ${esc(e.name)} · ${esc(e.project_name)}${ro ? ' · read only' : ''}</div></div>
+    w.innerHTML = `<div class="wiz-h"><img src="/assets/logo.png" alt=""><div class="grow"><h3>Booking application</h3><div class="xs muted">${e.id} · ${esc(e.name)} · ${esc(e.project_name)}${ro ? ' · read only' : corr ? ' · <b style="color:var(--cu-d)">editing: corrections are logged</b>' : ''}</div></div>
         <a class="btn line sm hide-m" target="_blank" rel="noopener" href="/api/enquiries/${e.id}/application.pdf" id="wPdf" ${b.flat_id ? '' : 'style="display:none"'}>${ic('print', 16)} Print / PDF</a><button class="btn ghost icon" id="wX">${ic('x')}</button></div>
       <nav class="wiz-side" id="wSide"><div class="prog"><div class="row spread xs b"><span>Completion</span><span id="pT">0%</span></div><div class="bar"><i id="pB"></i></div></div>
         ${F.sections.map((s, i) => `<a data-i="${i}" data-s="${s.id}"><span class="n">${s.no}</span><span class="t">${esc(s.title)}</span></a>`).join('')}</nav>
       <div class="wiz-body" id="wBody"><div class="inner">${F.sections.map((s, i) => `<section class="wiz-sec" id="ws-${s.id}" data-i="${i}"><div class="head"><span class="n">${s.no}</span><div><div class="over">Section ${s.no} of ${F.sections.length}</div><h2>${esc(s.title)}</h2></div></div><div class="card p">${secBody(s)}</div></section>`).join('')}</div></div>
-      <div class="wiz-f"><span class="note xs muted grow" id="wNote">${ro ? 'This application is read only.' : 'Drafts keep the flat on hold. Submit once the customer confirms every detail.'}</span>
-        <button class="btn line" id="wPrev">${ic('back', 16)} Back</button>${ro ? '' : '<button class="btn soft" id="wSave">Save draft</button>'}<button class="btn" id="wNext">Next ${ic('arrow', 16)}</button>${ro ? '' : `<button class="btn cu hide" id="wSubmit">${ic('check', 16)} Submit application</button>`}</div>`;
+      <div class="wiz-f"><span class="note xs muted grow" id="wNote">${ro ? 'This application is read only.' : corr ? (e.stage === 'Booked' ? 'Booked — corrections need a reason; the signed PDF is re-issued.' : 'Submitted — fix any mistake and save. The flat stays the same.') : 'Drafts keep the flat on hold. Submit once the customer confirms every detail.'}</span>
+        <button class="btn line" id="wPrev">${ic('back', 16)} Back</button>${ro ? '' : corr ? `<button class="btn cu" id="wFix">${ic('check', 16)} Save corrections</button>` : '<button class="btn soft" id="wSave">Save draft</button>'}<button class="btn" id="wNext">Next ${ic('arrow', 16)}</button>${ro || corr ? '' : `<button class="btn cu hide" id="wSubmit">${ic('check', 16)} Submit application</button>`}</div>`;
     document.body.appendChild(w);
     const show = (i) => {
       cur = Math.max(0, Math.min(F.sections.length - 1, i));
@@ -711,6 +720,98 @@
     };
     if ($('wSave')) $('wSave').onclick = run(() => save(false));
     if ($('wSubmit')) $('wSubmit').onclick = run(() => save(true));
+    if ($('wFix')) $('wFix').onclick = () => {
+      const need = e.stage === 'Booked';
+      modal({ title: 'Save corrections', sub: need ? 'This booking is approved — the reason is recorded and the signed PDF is re-issued.' : 'Your name and the changed fields are recorded in the activity log.', body: `
+        <div class="chips mb-12" id="rq">${['Typo / spelling', 'Customer updated details', 'Wrong document number', 'Bank details changed', 'Price / plan revised'].map((x) => `<button class="chip" data-v="${x}">${x}</button>`).join('')}</div>
+        <div class="field"><label>Reason ${need ? '<span class="req">*</span>' : '(optional)'}</label><input type="text" id="rr2" placeholder="What was corrected and why"></div>
+        <div class="row" style="justify-content:flex-end"><button class="btn line" data-close>Cancel</button><button class="btn" id="rok">${ic('check', 16)} Save corrections</button></div>`,
+      onOpen: () => {
+        qsa('#rq .chip').forEach((c) => (c.onclick = () => { $('rr2').value = c.dataset.v; qsa('#rq .chip').forEach((x) => x.classList.toggle('on', x === c)); }));
+        $('rok').onclick = run(async () => {
+          if (need && !$('rr2').value.trim()) throw new Error('Give a reason');
+          let r;
+          try { r = await api(`/api/enquiries/${e.id}/booking/correct`, { method: 'PUT', json: { form: f, reason: $('rr2').value } }); } catch (err) { closeModal(); if (err.errors) markErrors(err.errors); throw err; }
+          closeModal(); toast(r.changes.length ? `Saved ${r.changes.length} correction${r.changes.length === 1 ? '' : 's'}` : 'No changes to save');
+          if (r.changes.length) { closeAll(); onDone && onDone(); }
+        });
+      } });
+    };
+  }
+
+  /* ======================= EDIT ENQUIRY DETAILS ======================= */
+  async function editEnquiry(e, after) {
+    const cfg = state.pubCfg || (state.pubCfg = await (await fetch('/api/public/config')).json());
+    const opt = (list, v) => list.map((x) => `<option ${x === v ? 'selected' : ''}>${esc(x)}</option>`).join('');
+    const proj = () => cfg.projects.find((p) => String(p.id) === $('eP').value) || { configs: [] };
+    modal({ title: 'Edit customer details', sub: `${e.id} · every change is logged with your name`, wide: true, body: `<div class="fgrid">
+      <div class="field"><label>Full name *</label><input type="text" id="eN" value="${esc(e.name)}"></div>
+      <div class="field"><label>Mobile *</label><input type="tel" id="eM" inputmode="numeric" maxlength="10" value="${esc(e.mobile)}"></div>
+      <div class="field"><label>Email</label><input type="email" id="eE" value="${esc(e.email)}"></div>
+      <div class="field"><label>Residence</label><input type="text" id="eR" value="${esc(e.residence)}"></div>
+      <div class="field"><label>Project ${e.booking ? '<span class="hint">(fixed — flat chosen)</span>' : ''}</label><select id="eP" ${e.booking ? 'disabled' : ''}>${cfg.projects.map((p) => `<option value="${p.id}" ${String(p.id) === String(e.project_id) ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></div>
+      <div class="field"><label>Configuration</label><select id="eC"></select></div>
+      <div class="field"><label>Budget</label><select id="eB">${opt(cfg.budgets, e.budget)}</select></div>
+      <div class="field"><label>Purpose</label><select id="eU"><option value="">—</option>${opt(cfg.purposes, e.purpose)}</select></div>
+      <div class="field"><label>Source</label><select id="eS">${opt(cfg.sources, e.source)}</select></div>
+      <div class="field"><label>Channel partner</label><input type="text" id="eCp" value="${esc(e.cp_name)}"></div>
+      <div class="field"><label>Visit preference</label><select id="eV"><option value="">—</option>${opt(cfg.visitPrefs, e.visit_pref)}</select></div>
+      <div class="field"><label>Reason (optional)</label><input type="text" id="eWhy" placeholder="e.g. typo in name"></div></div>
+      <div class="row" style="justify-content:flex-end"><button class="btn line" data-close>Cancel</button><button class="btn" id="eOk">${ic('check', 16)} Save changes</button></div>`,
+    onOpen: () => {
+      const fillC = (keep) => { const list = proj().configs || []; const v = keep ? e.config : list[0]; $('eC').innerHTML = (keep && !list.includes(e.config) ? `<option selected>${esc(e.config)}</option>` : '') + opt(list, v); };
+      fillC(true); $('eP').onchange = () => fillC(false);
+      $('eM').oninput = () => ($('eM').value = $('eM').value.replace(/\D/g, '').slice(0, 10));
+      $('eOk').onclick = run(async () => {
+        const r = await api(`/api/enquiries/${e.id}`, { method: 'PATCH', json: { name: $('eN').value, mobile: $('eM').value, email: $('eE').value, residence: $('eR').value, projectId: $('eP').value, config: $('eC').value, budget: $('eB').value, purpose: $('eU').value, source: $('eS').value, cpName: $('eCp').value, visitPref: $('eV').value, reason: $('eWhy').value } });
+        closeModal(); toast(r.changes.length ? `Updated: ${r.changes.join(', ')}` : 'No changes'); after && after();
+      });
+    } });
+  }
+
+  /* ======================= CUSTOMER PROFILE ======================= */
+  const mask = (v, keep = 4) => { const s = String(v || '').replace(/\s/g, ''); return s ? '•'.repeat(Math.max(0, s.length - keep)) + s.slice(-keep) : ''; };
+  async function drawProfile(e, re) {
+    const host = $('profileV'); if (!host) return;
+    const b = e.booking || {}; const x = b.extra || (e.customerForm && e.customerForm.data) || {}; const a1 = x.a1 || {}; const a2 = x.a2 || {};
+    const kv = (rows) => { const r = rows.filter(([, v]) => v !== undefined && v !== null && String(v).trim() !== ''); return `<dl class="kv">${r.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('') || '<dd class="muted">Not filled yet</dd>'}</dl>`; };
+    const person = (p) => kv([['Name', esc(p.name)], ["Father's / spouse's name", esc(p.relation)], ['Date of birth', p.dob ? day(p.dob) : ''], ['Gender', esc(p.gender)], ['PAN', esc(p.pan)], ['Aadhaar', esc(mask(p.aadhaar))], ['Nationality', esc(p.nationality)], ['Occupation', esc([p.occupation, p.company].filter(Boolean).join(' · '))],
+      ['Relationship', esc(p.relationship)], ['Address', esc([p.address, p.city, p.pin].filter(Boolean).join(', '))], ['Mobile', p.mobile ? ph(p.mobile) : ''], ['Alternate', p.altMobile ? ph(p.altMobile) : ''], ['Email', esc(p.email)],
+      ['Bank', esc([p.bank, p.branch].filter(Boolean).join(' · '))], ['Account', p.accountNo ? `${esc(mask(p.accountNo))} · ${esc(p.ifsc || '')} · ${esc(p.accountType || '')}` : '']]);
+    const paid = e.payments.filter((p) => p.status === 'Received').reduce((t, p) => t + Number(p.amount), 0);
+    const submitted = state.stages.indexOf(e.stage) >= state.stages.indexOf('KYC');
+    const forms = [
+      ['Enquiry form', `Filled in the app ${day(e.created_at)} · ${e.source}`, `/api/enquiries/${e.id}/enquiry.pdf`, 'users'],
+      ['Booking application', e.booking ? (submitted ? 'Submitted' : 'Draft') + (e.customerForm && e.customerForm.submitted_at ? ' · customer filled online' : '') : e.customerForm ? 'Customer is filling it online' : 'Not started', e.booking ? `/api/enquiries/${e.id}/application.pdf` : null, 'doc'],
+      ...(paid ? [['Allotment letter', 'MahaRERA format · issued against the booking amount', `/api/enquiries/${e.id}/allotment.pdf`, 'stamp']] : []),
+      ...(e.signatures.developer ? [['Signed booking application', `Approved ${day(e.signatures.developer.signed_at)}`, `/api/enquiries/${e.id}/booking.pdf`, 'sign']] : []),
+      ...e.quotations.map((q) => [`Quotation ${q.id}`, `${inr(Math.round(q.total))} · ${day(q.created_at)}`, `/api/quotations/${q.id}.pdf`, 'quote']),
+    ];
+    const edit = can.sell() && e.stage !== 'Lost';
+    host.innerHTML = `<div class="g split mt-16" style="align-items:start"><div class="stack gap-14">
+      <div class="card"><div class="card-h"><h3>Contact &amp; interest</h3>${edit ? `<button class="btn ghost sm" data-edit="enq">${ic('sign', 15)} Edit</button>` : ''}</div><div class="card-b">${kv([
+        ['Mobile', `${ph(e.mobile)} ${e.wa_linked_at ? '<span class="badge ok">on WhatsApp</span>' : ''}`], ['Email', esc(e.email)], ['Residence', esc(e.residence)],
+        ['Interested in', `${esc(e.project_name)} · ${esc(e.config)}`], ['Budget', esc(e.budget)], ['Purpose', esc(e.purpose)], ['Source', esc(e.source) + (e.cp_name ? ' — ' + esc(e.cp_name) : '')],
+        ['Visit preference', esc(e.visit_pref)], ['Relationship manager', esc(e.assigned_name || 'Unassigned')], ['First contact', when(e.created_at)]])}</div></div>
+      <div class="card"><div class="card-h"><h3>Applicant${a2.name ? 's' : ''}</h3>${e.booking && edit && !(e.stage === 'Booked' && !can.approve()) ? `<button class="btn ghost sm" data-edit="app">${ic('sign', 15)} Edit application</button>` : ''}</div><div class="card-b">
+        ${a2.name ? `<div class="g g2"><div><div class="over mb-12" style="color:var(--cu-d)">First applicant</div>${person(a1)}</div><div><div class="over mb-12" style="color:var(--cu-d)">Second applicant</div>${person(a2)}</div></div>` : person(a1)}
+        ${x.funding ? `<div class="sep"></div><div class="over mb-12" style="color:var(--cu-d)">Financing</div>${kv([['Funding', esc(x.funding)], ['Loaning bank', esc([x.loanBank, x.loanBranch].filter(Boolean).join(' · '))], ['Bank contact', esc([x.loanOfficer, x.loanPhone].filter(Boolean).join(' · '))], ['Loan amount', x.loanAmount ? inr(x.loanAmount) : ''], ['Sanction ref.', esc(x.loanRef)]])}` : ''}</div></div>
+      ${e.booking ? `<div class="card"><div class="card-h"><h3>Booked unit</h3>${badge(e.stage)}</div><div class="card-b"><div class="unit"><div><span>Unit</span><b>${esc(b.tower)} · ${esc(b.unit)}</b></div><div><span>Floor</span><b>${esc(b.floor || '—')}</b></div><div><span>Carpet</span><b>${esc(b.carpet_area || '—')} sq ft</b></div><div><span>Total</span><b>${inr(b.total_consideration)}</b></div><div><span>Paid</span><b>${inr(paid)}</b></div><div><span>Balance</span><b>${b.total_consideration ? inr(Number(b.total_consideration) - paid) : '—'}</b></div></div>
+        ${kv([['MahaRERA No.', esc(x.reraNo)], ['Parking', esc(x.parking)], ['Possession', x.possession ? day(x.possession) : ''], ['Channel partner', esc([x.cpName, x.cpCode].filter(Boolean).join(' · '))], ['Sales manager', esc([x.smName, x.smEmpId].filter(Boolean).join(' · '))]])}</div></div>` : ''}
+    </div><div class="stack gap-14">
+      <div class="card"><div class="card-h"><h3>Forms &amp; documents</h3><span class="xs muted">filled in the app · printable</span></div><div class="card-b"><div class="list">
+        ${forms.map(([t, sub, url, i]) => `<div class="li"><span class="avatar" style="border-radius:10px;background:var(--aqua-p);color:var(--aqua-d)">${ic(i, 17)}</span><div class="grow"><b class="sm">${t}</b><div class="xs muted">${esc(sub)}</div></div>
+          ${url ? `<a class="btn ghost sm icon" target="_blank" rel="noopener" href="${url}" title="Open & print">${ic('print', 16)}</a><a class="btn ghost sm icon" href="${url}?download=1" title="Download PDF">${ic('download', 16)}</a>` : ''}</div>`).join('')}
+        ${e.kyc.map((k) => `<div class="li"><span class="avatar" style="border-radius:10px;background:var(--cu-t);color:var(--cu-d)">${ic('upload', 16)}</span><div class="grow"><b class="sm">KYC · ${esc(k.kind.replace('_', ' ').toUpperCase())}</b><div class="xs muted">${esc(k.original_name || '')} · ${day(k.uploaded_at)}</div></div><a class="btn ghost sm icon" target="_blank" rel="noopener" href="/api/files/${k.file_id}">${ic('eye', 16)}</a></div>`).join('')}</div></div></div>
+      <div class="card"><div class="card-h"><h3>Payments</h3></div><div class="card-b">${e.payments.length ? `<div class="list">${e.payments.map((p) => `<div class="li"><div class="grow"><b class="sm num">${inr(p.amount)}</b><div class="xs muted">${esc(p.mode)} · ${day(p.txn_date || p.submitted_at)} · <span class="mono">${esc(p.ref || '')}</span></div></div><span class="badge ${p.status === 'Received' ? 'ok' : p.status === 'Rejected' ? 'bad' : 'warn'}">${esc(p.status === 'Received' ? p.receipt_no || 'Received' : p.status)}</span></div>`).join('')}</div>` : '<div class="muted sm">No payments yet</div>'}</div></div>
+      <div class="card"><div class="card-h"><h3>Other enquiries</h3></div><div class="card-b" id="pOther"><div class="skel" style="height:40px"></div></div></div>
+    </div></div>`;
+    qsa('[data-edit]', host).forEach((bn) => (bn.onclick = run(() => (bn.dataset.edit === 'enq' ? editEnquiry(e, re) : openWizard(e, re)))));
+    try {
+      const { others } = await api(`/api/enquiries/${e.id}/profile`);
+      $('pOther').innerHTML = others.length ? `<div class="list">${others.map((o) => `<div class="li go" data-c="${o.id}"><div class="grow"><b class="sm">${o.id} · ${esc(o.project_name)}</b><div class="xs muted">${esc(o.config)} · ${day(o.created_at)} · ${esc(o.assigned_name || '')}</div></div>${badge(o.stage)}</div>`).join('')}</div>` : '<div class="muted sm">This is their only enquiry.</div>';
+      qsa('[data-c]', $('pOther')).forEach((el) => (el.onclick = () => go('c-' + el.dataset.c)));
+    } catch { $('pOther').innerHTML = '<div class="muted sm">—</div>'; }
   }
 
   /* ======================= FOLLOW-UPS ======================= */
@@ -915,17 +1016,31 @@ ${enqLink(null)}
 
   /* ======================= FORMS ======================= */
   async function viewForms() {
-    const forms = [
-      ['Walk-in Enquiry Form', 'One page · for reception when the tablet is unavailable', '/api/forms/enquiry.pdf', 'users'],
-      ['Booking Application Form', '12 sections · applicants, flat, bank, loan, CLP, T&C, MahaRERA norms, signatures', '/api/forms/booking-application.pdf', 'doc'],
-    ];
-    $('view').innerHTML = `<div class="fade-in">${pageHead('Forms', 'Every form in the app is also printable — blank for paper use, or filled from any customer page.')}
-      <div class="g g2">${forms.map(([t, d, u, i]) => `<div class="card p stack gap-14"><div class="row" style="flex-wrap:nowrap"><span class="avatar lg" style="border-radius:16px;background:var(--cu-t);color:var(--cu-d)">${ic(i, 24)}</span><div class="grow"><h3>${t}</h3><p class="sm muted">${d}</p></div></div>
-        <div class="row"><a class="btn cu" target="_blank" rel="noopener" href="${u}">${ic('print', 16)} Open & print</a><a class="btn line" href="${u}?download=1">Download PDF</a></div></div>`).join('')}</div>
-      <div class="card enq p mt-16"><div class="row" style="flex-wrap:nowrap;align-items:flex-start"><span class="avatar" style="border-radius:12px;background:#fff;color:var(--aqua-d)">${ic('link', 18)}</span><div class="grow"><h3>Customers fill the forms in the app</h3>
-          <p class="sm muted"><b>Enquiry form</b>: at the reception kiosk or the online link (<span class="mono">/enquire/</span>). After submitting, the customer can print or download their filled enquiry form.<br><b>Booking application</b>: open the customer → <b>Booking application</b> → <b>Send form link</b>. The customer fills their details on their phone, accepts the terms and can print the filled form. You add the flat, cost sheet and payment.</p>
-          <div class="row mt-12"><a class="btn line sm" target="_blank" rel="noopener" href="/enquire/">${ic('eye', 15)} Open enquiry form</a><a class="btn ghost sm" target="_blank" rel="noopener" href="/forms/enquiry.pdf">Public blank enquiry form</a><a class="btn ghost sm" target="_blank" rel="noopener" href="/forms/booking-application.pdf">Public blank booking form</a></div></div></div></div>
-      <div class="card p mt-16 row" style="flex-wrap:nowrap"><span class="avatar" style="border-radius:12px;background:var(--navy-t)">${ic('users', 18)}</span><div class="grow"><h3>Filled forms for a customer</h3><p class="sm muted">Open any customer → <b>Enquiry form</b> or <b>Application</b> in the header. The booking application shows a DRAFT watermark until the manager signs and approves.</p></div></div></div>`;
+    loading();
+    const { enquiries } = await api('/api/enquiries');
+    let q = '', kind = '';
+    const draw = () => {
+      const rows = enquiries.filter((e) => (!q || `${e.name} ${e.mobile} ${e.id}`.toLowerCase().includes(q)) && (!kind || (kind === 'app' ? e.has_booking : kind === 'allot' ? e.has_paid : kind === 'signed' ? e.stage === 'Booked' : true)));
+      const btn = (url, label) => `<a class="btn ghost sm" target="_blank" rel="noopener" href="${url}" title="Open & print">${ic('print', 15)}<span class="hide-m">${label}</span></a><a class="btn ghost sm icon" href="${url}?download=1" title="Download PDF">${ic('download', 15)}</a>`;
+      $('fl').innerHTML = rows.length ? `<div class="tscroll"><table class="tbl"><thead><tr><th>Customer</th><th>Enquiry form</th><th>Booking application</th><th>Allotment letter</th><th>Signed booking</th></tr></thead><tbody>
+        ${rows.map((e) => `<tr><td><a href="#c-${e.id}" style="text-decoration:none;color:var(--ink)"><div class="person">${avatar(e.name)}<div style="min-width:0"><b class="sm">${esc(e.name)}</b><div class="xs muted">${e.id} · ${esc(e.project_name)}</div></div></div></a></td>
+          <td class="nowrap">${btn(`/api/enquiries/${e.id}/enquiry.pdf`, 'Print')}</td>
+          <td class="nowrap">${e.has_booking ? btn(`/api/enquiries/${e.id}/application.pdf`, state.stages.indexOf(e.stage) >= state.stages.indexOf('KYC') ? 'Submitted' : 'Draft') : e.customer_form ? '<span class="badge info">Customer filling</span>' : '<span class="faint xs">Not started</span>'}</td>
+          <td class="nowrap">${e.has_paid ? btn(`/api/enquiries/${e.id}/allotment.pdf`, 'Print') : '<span class="faint xs">After payment</span>'}</td>
+          <td class="nowrap">${e.stage === 'Booked' ? btn(`/api/enquiries/${e.id}/booking.pdf`, 'Print') : '<span class="faint xs">—</span>'}</td></tr>`).join('')}</tbody></table></div>`
+        : `<div class="empty">${ic('doc')}<div class="b">No forms match</div></div>`;
+    };
+    $('view').innerHTML = `<div class="fade-in">${pageHead('Forms', 'Every form is filled in the app by the customer or the team, and every filled form can be printed or downloaded.')}
+      <div class="g g3 mb-16">
+        <div class="card enq p"><div class="over" style="color:var(--aqua-d)">Enquiry form</div><p class="sm mt-8">Customers fill it at the <b>reception kiosk</b> or from the <b>online link</b>. They can print their copy straight away.</p><div class="row mt-12"><a class="btn sm" target="_blank" rel="noopener" href="/enquire/">${ic('eye', 15)} Open online form</a></div></div>
+        <div class="card enq p"><div class="over" style="color:var(--aqua-d)">Booking application</div><p class="sm mt-8">The customer fills their details from the <b>Send form link</b> on their page. The team adds the flat, cost sheet and payment, and can edit any mistake.</p></div>
+        <div class="card enq p"><div class="over" style="color:var(--aqua-d)">Allotment letter</div><p class="sm mt-8">Generated in the MahaRERA format once Accounts verify the booking amount (≤ 10%). Print it or send it on WhatsApp.</p></div></div>
+      <div class="card"><div class="card-h" style="flex-wrap:wrap"><h3>Filled forms</h3><div class="row"><div class="search" style="min-width:220px">${ic('search')}<input type="text" id="fq" placeholder="Search customer"></div>
+        <div class="seg" id="fk">${[['', 'All'], ['app', 'Applications'], ['allot', 'Allotments'], ['signed', 'Signed']].map(([k, l]) => `<button data-k="${k}" class="${k === kind ? 'on' : ''}">${l}</button>`).join('')}</div></div></div><div id="fl"></div></div>
+      <p class="xs muted mt-16">Blank templates for reference: <a href="/forms/enquiry.pdf" target="_blank" rel="noopener">enquiry form</a> · <a href="/forms/booking-application.pdf" target="_blank" rel="noopener">booking application</a></p></div>`;
+    $('fq').oninput = () => { q = $('fq').value.trim().toLowerCase(); draw(); };
+    qsa('#fk button').forEach((b) => (b.onclick = () => { kind = b.dataset.k; qsa('#fk button').forEach((x) => x.classList.toggle('on', x === b)); draw(); }));
+    draw();
   }
 
   /* ======================= PROFILE / CARD STUDIO ======================= */

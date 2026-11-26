@@ -63,6 +63,10 @@ const SECTIONS = [
       { k: 'possession', label: 'Possession Date (as per RERA)', type: 'date' },
       { k: 'agreementValue', label: 'Total Agreement Value (₹)', type: 'money', req: true },
       { k: 'otherCharges', label: 'Other Applicable Charges (₹)', type: 'money' },
+      { k: 'encumbrances', label: 'Encumbrances on the Unit (if any)', def: 'None', ph: 'e.g. None / project loan from XYZ Bank' },
+      { k: 'collBank', label: 'RERA Designated Collection A/c — Bank & Branch', ph: 'As per MahaRERA registration' },
+      { k: 'collAccount', label: 'RERA Designated Collection A/c No.', digits: true, max: 18 },
+      { k: 'collIfsc', label: 'Collection A/c IFSC', pattern: IFSC, upper: true, max: 11 },
     ],
   },
   { id: 'payment', no: 4, title: 'First Transaction / Booking Payment Details', kind: 'payment' },
@@ -155,9 +159,10 @@ const RERA_SLABS = [
 const RERA_NORMS = [
   'Booking amount / advance collected before execution and registration of the Agreement for Sale shall not exceed 10% of the total cost of the unit.',
   'An allotment letter in the MahaRERA model format shall be issued against the booking amount, stating the MahaRERA registration number, unit and carpet area, parking, total price, possession date, payment milestones and encumbrances, if any.',
-  'Payments shall be made only to the project\'s RERA designated collection bank account as specified in the allotment letter / Agreement for Sale.',
+  'Under MahaRERA\'s three-account framework (Order No. 56/2024; updated proformas under Order No. 60/2024), all payments shall be made only to the project\'s RERA Designated Collection Bank Account, whose details are stated in this application, the allotment letter and the Agreement for Sale.',
   'Refund of the balance amount after permissible deduction shall be made within 45 days of the written cancellation request; delayed refunds attract interest (SBI highest MCLR + 2%) as per MahaRERA norms.',
-  'The Developer may offer more buyer-favourable terms (more days or lower deductions). Any deviation from the MahaRERA model format shall be disclosed and highlighted.',
+  'The Developer uploads its allotment letter proforma at project registration. The Developer may offer more buyer-favourable terms (more days or lower deductions); any deviation from the MahaRERA model format shall be disclosed and highlighted in a deviation report, with the buyer\'s consent — no hidden one-sided clauses.',
+  'The allotment letter, not merely a payment receipt or booking form, is the document issued against the booking amount. Official formats are available on the MahaRERA website.',
 ];
 
 const DECLARATION = [

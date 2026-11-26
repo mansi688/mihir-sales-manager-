@@ -208,6 +208,110 @@ async function saveBooking(e, user, b) {
   return { errors };
 }
 
+/* ---------- Corrections (sales / manager / admin), fully audited ---------- */
+const LOCKED_KEYS = ['project', 'tower', 'wing', 'unit', 'floor', 'config', 'smName', 'smEmpId', 'smPhone', 'smEmail'];
+function fieldLabels() {
+  const m = {};
+  for (const sec of BF.SECTIONS) {
+    if (sec.kind === 'pair') for (const f of sec.fields) { m['a1.' + f.k] = `First applicant — ${f.label}`; m['a2.' + f.k] = `Second applicant — ${f.label}`; }
+    for (const f of BF.allFields(sec)) if (sec.kind !== 'pair' || (sec.extra || []).includes(f)) m[f.k] = f.label;
+  }
+  return m;
+}
+function diffForm(a = {}, b = {}) {
+  const L = fieldLabels(); const out = [];
+  for (const [k, label] of Object.entries(L)) {
+    const [x, y] = k.includes('.') ? [((a[k.split('.')[0]] || {})[k.split('.')[1]]), ((b[k.split('.')[0]] || {})[k.split('.')[1]])] : [a[k], b[k]];
+    if (String(x ?? '') !== String(y ?? '')) out.push(label);
+  }
+  if (JSON.stringify((a.clp || []).map((r) => [r.milestone, r.pct, r.due])) !== JSON.stringify((b.clp || []).map((r) => [r.milestone, r.pct, r.due]))) out.push('Payment plan (CLP)');
+  if (!!a.declarationAccepted !== !!b.declarationAccepted) out.push('Declaration');
+  return out;
+}
+
+async function correctBooking(e, user, { form: input, reason }) {
+  if (e.stage === 'Lost') throw httpError(400, 'This enquiry is closed');
+  const bk = await one('SELECT * FROM bookings WHERE enquiry_id=?', e.id);
+  if (!bk) throw httpError(400, 'Save the booking application first');
+  const booked = e.stage === 'Booked';
+  reason = String(reason || '').trim().slice(0, 300);
+  if (booked && !['manager', 'admin'].includes(user.role)) throw httpError(403, 'Only a manager or admin can correct a booked application');
+  if (booked && !reason) throw httpError(400, 'Give a reason for correcting a booked application');
+  const old = bk.extra || {};
+  const form = BF.normalize(input || {});
+  for (const k of LOCKED_KEYS) form[k] = old[k] || '';
+  const agreement = Number(form.agreementValue) || null; const other = Number(form.otherCharges) || 0; const total = agreement ? agreement + other : null;
+  form.totalConsideration = total ? String(total) : '';
+  form.clp = form.clp.map((r) => ({ ...r, amount: total ? Math.round((total * r.pct) / 100) : null }));
+  const errors = BF.validate(form);
+  if (errors.length) throw Object.assign(httpError(400, 'Please fix the application:\n• ' + errors.slice(0, 8).join('\n• ')), { errors });
+  const paid = await one("SELECT coalesce(sum(amount),0) s FROM payments WHERE enquiry_id=? AND status<>'Rejected'", e.id);
+  if (total && Number(paid.s) > total * 0.1 + 0.5 && !booked) throw httpError(400, `Payments already recorded (Rs. ${Number(paid.s).toLocaleString('en-IN')}) would exceed 10% of the new total (RERA)`);
+  const changes = diffForm(old, form);
+  if (!changes.length) return { changes: [] };
+  await run(`UPDATE bookings SET carpet_area=?, agreement_value=?, other_charges=?, total_consideration=?, payment_plan=?, co_applicant=?, extra=?::jsonb, updated_at=now() WHERE enquiry_id=?`,
+    form.carpetSqft || '', agreement, other || null, total, form.funding || '', form.a2.name || '', JSON.stringify(form), e.id);
+  await logActivity(e.id, user.id, 'correction', `Application corrected by ${user.name}: ${changes.slice(0, 12).join(', ')}${changes.length > 12 ? ` +${changes.length - 12} more` : ''}${reason ? ' — reason: ' + reason : ''}`);
+  if (booked) { // re-issue the signed PDF so the stored copy matches the record
+    const full = await fullEnquiry(e.id); const sig = full.signatures;
+    const img = async (x) => (x && x.file_id ? (await getFile(x.file_id))?.data : null);
+    const dev = sig.developer ? await one('SELECT name, designation FROM users WHERE id=?', sig.developer.signed_by) : null;
+    const pdf = await bookingPdf({
+      enquiry: full, booking: full.booking, payment: full.payments.find((p) => p.status === 'Received'), kyc: full.kyc,
+      signatures: {
+        customer: sig.customer ? { ...sig.customer, image: await img(sig.customer) } : null,
+        co_applicant: sig.co_applicant ? { ...sig.co_applicant, image: await img(sig.co_applicant) } : null,
+        developer: sig.developer ? { ...sig.developer, image: await img(sig.developer), name: dev && dev.name, designation: dev && dev.designation } : null,
+      },
+    });
+    const fid = await saveFile('booking_pdf', 'application/pdf', `Booking Application ${e.id} (rev ${new Date().toISOString().slice(0, 10)}).pdf`, pdf);
+    await run('UPDATE bookings SET pdf_file_id=? WHERE enquiry_id=?', fid, e.id);
+  }
+  await crm.sync(e.id, 'bookingForm');
+  return { changes };
+}
+
+/* Enquiry details (the walk-in / online form) */
+const ENQ_FIELDS = { name: 'Name', mobile: 'Mobile', email: 'Email', residence: 'Residence', project_id: 'Project', config: 'Configuration', budget: 'Budget', purpose: 'Purpose', source: 'Source', cp_name: 'Channel partner', visit_pref: 'Visit preference' };
+async function updateEnquiry(e, user, b) {
+  if (e.stage === 'Lost' && !['manager', 'admin'].includes(user.role)) throw httpError(400, 'This enquiry is closed');
+  const next = {
+    name: b.name !== undefined ? String(b.name).trim().slice(0, 120) : e.name,
+    mobile: b.mobile !== undefined ? String(b.mobile).replace(/\D/g, '').slice(-10) : e.mobile,
+    email: b.email !== undefined ? String(b.email).trim().slice(0, 120) : e.email,
+    residence: b.residence !== undefined ? String(b.residence).trim().slice(0, 200) : e.residence,
+    project_id: b.projectId !== undefined ? String(b.projectId) : String(e.project_id),
+    config: b.config !== undefined ? String(b.config).trim().slice(0, 40) : e.config,
+    budget: b.budget !== undefined ? String(b.budget).slice(0, 40) : e.budget,
+    purpose: b.purpose !== undefined ? String(b.purpose).slice(0, 40) : e.purpose,
+    source: b.source !== undefined ? String(b.source).slice(0, 40) : e.source,
+    cp_name: b.cpName !== undefined ? String(b.cpName).trim().slice(0, 120) : e.cp_name,
+    visit_pref: b.visitPref !== undefined ? String(b.visitPref).slice(0, 40) : e.visit_pref,
+  };
+  if (next.name.length < 2) throw httpError(400, 'Name is required');
+  if (!/^[6-9]\d{9}$/.test(next.mobile)) throw httpError(400, 'Enter a valid 10-digit mobile number');
+  if (next.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next.email)) throw httpError(400, 'Email looks invalid');
+  if (next.project_id !== String(e.project_id)) {
+    if (await one('SELECT 1 FROM bookings WHERE enquiry_id=?', e.id)) throw httpError(400, 'The project cannot change after a flat is chosen — edit the booking application instead');
+    if (!(await one('SELECT 1 FROM public.projects WHERE id::text=? AND is_active', next.project_id))) throw httpError(400, 'Choose a project');
+  }
+  const changed = Object.keys(ENQ_FIELDS).filter((k) => String(next[k] ?? '') !== String(k === 'project_id' ? e.project_id : e[k] ?? ''));
+  if (!changed.length) return { changes: [] };
+  await run(`UPDATE enquiries SET name=?, mobile=?, email=?, residence=?, project_id=?::uuid, config=?, budget=?, purpose=?, source=?, cp_name=?, visit_pref=?, updated_at=now() WHERE id=?`,
+    next.name, next.mobile, next.email, next.residence, next.project_id, next.config, next.budget, next.purpose, next.source, next.cp_name, next.visit_pref, e.id);
+  const reason = String(b.reason || '').trim().slice(0, 300);
+  await logActivity(e.id, user.id, 'correction', `Enquiry details edited by ${user.name}: ${changed.map((k) => ENQ_FIELDS[k]).join(', ')}${reason ? ' — reason: ' + reason : ''}`);
+  await crm.sync(e.id, 'update');
+  return { changes: changed.map((k) => ENQ_FIELDS[k]) };
+}
+
+/* Everything about one customer: this enquiry plus their other enquiries (same mobile). */
+async function customerProfile(e) {
+  const others = await all(`SELECT e.id, e.stage, e.created_at, e.config, p.name project_name, u.name assigned_name FROM enquiries e
+      JOIN public.projects p ON p.id=e.project_id LEFT JOIN users u ON u.id=e.assigned_to WHERE e.mobile=? AND e.id<>? ORDER BY e.created_at DESC`, e.mobile, e.id);
+  return { others };
+}
+
 async function addKyc(e, user, kind, file) {
   if (!(await one('SELECT 1 FROM bookings WHERE enquiry_id=?', e.id))) throw httpError(400, 'Save the booking form first');
   const fileId = await saveFile('kyc', file.mimetype, file.originalname, file.buffer);
@@ -356,5 +460,5 @@ function shareLink(fileId, days) {
 module.exports = {
   listProjects, getEnquiry, fullEnquiry, createEnquiry, handleInboundWhatsApp, reassign, attend, siteVisit, addNote, saveBooking,
   addKyc, kycComplete, submitPayment, verifyPayment, rejectPayment, saveSignature, approveBooking, markLost, publicProfile, shareLink,
-  REQUIRED_KYC, userById, previewPdf,
+  REQUIRED_KYC, userById, previewPdf, correctBooking, updateEnquiry, customerProfile,
 };
