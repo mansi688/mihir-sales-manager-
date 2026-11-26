@@ -3,6 +3,10 @@
  * Sections and legal text come from src/content/booking-form.js so the PDF always matches the app.
  */
 const PDFDocument = require('pdfkit');
+// pdfkit loads its built-in fonts through package "imports" (#standard-fonts/…), which Vercel's file tracer
+// does not follow. Static requires make sure the font files are bundled with the serverless function.
+require('pdfkit/standard-fonts/Helvetica'); require('pdfkit/standard-fonts/HelveticaBold');
+require('pdfkit/standard-fonts/HelveticaOblique'); require('pdfkit/standard-fonts/HelveticaBoldOblique');
 const config = require('../config');
 const LOGO = require('../assets/logo');
 let LOGO_LIGHT = null; try { LOGO_LIGHT = require('../assets/logo-light'); } catch { /* optional */ }
