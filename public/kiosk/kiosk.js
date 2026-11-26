@@ -163,7 +163,7 @@
           <div class="muted small">${esc(s.designation || '')}</div></div></div>
         <p class="help" style="margin:14px 0 0">${d.busy ? 'Our team is with other guests — someone will be with you very shortly.' : esc(s.name.split(' ')[0]) + ' will meet you in the lounge in a few minutes.'}</p>`
         : '<p class="help">Our reception team will introduce you to a relationship manager shortly.</p>'}
-      <div class="k-nav" style="justify-content:center"><button class="btn line lg" id="dn">Done — return tablet to reception</button></div>
+      <div class="k-nav" style="justify-content:center">${d.formUrl ? `<a class="btn line lg" target="_blank" rel="noopener" href="${esc(d.formUrl)}">Print enquiry form</a>` : ''}<button class="btn lg" id="dn">Done — return tablet to reception</button></div>
     </div>`;
     $('dn').onclick = reset;
   }

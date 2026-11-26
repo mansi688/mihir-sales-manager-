@@ -19,6 +19,10 @@ site visit → booking form (real CRM inventory) → KYC → first payment → s
 | A sales person's public e-card | `/card/ankit-deshmukh` |
 | **Customer portal** — online enquiry for WhatsApp links | `/enquire/` · `/enquire/?rm=<staff-slug>` routes the lead to that person |
 | Quotation link sent to a customer | `/q/<token>` *(valid 30 days)* |
+| Landing page (first page) | `/` — customers, staff login and kiosk entry points |
+| **Customer fills the booking application** | `/apply/?t=<token>`. Sent from the customer page via **Send form link**; valid 14 days |
+| Customer's filled enquiry form (print/PDF) | `/f/<token>`. Shown after enquiring online or at the kiosk |
+| Blank originals (print) | `/forms/enquiry.pdf`, `/forms/booking-application.pdf` |
 | Health check | `/health` |
 
 Demo staff (**PIN 1234 — change them on the Team page**):

@@ -27,7 +27,7 @@ r.post('/api/kiosk/enquiries', requireKiosk, ah(async (req, res) => {
   const out = await wf.createEnquiry(req.body || {});
   const link = wa.kioskLink(out.enquiry.id);
   const qr = await QRCode.toDataURL(link, { margin: 1, width: 360, color: { dark: '#2A2E6E', light: '#FFFFFF' } });
-  res.json({ id: out.enquiry.id, firstName: out.enquiry.name.split(' ')[0], sales: out.sales, whatsappLink: link, qr, busy: !!out.assignment.busy });
+  res.json({ id: out.enquiry.id, firstName: out.enquiry.name.split(' ')[0], sales: out.sales, whatsappLink: link, qr, busy: !!out.assignment.busy, formUrl: require('./apply').formUrl(out.enquiry.id) });
 }));
 
 /* ---------- Customer portal: online enquiry (shared over WhatsApp) ---------- */
@@ -48,7 +48,7 @@ r.post('/api/public/enquiries', throttle, ah(async (req, res) => {
   const b = req.body || {};
   if (b.website) return res.json({ id: 'MG-0000', firstName: 'there', sales: null }); // honeypot
   const out = await wf.createEnquiry({ ...b, channel: 'online', source: b.source || 'WhatsApp' });
-  res.json({ id: out.enquiry.id, firstName: out.enquiry.name.split(' ')[0], sales: out.sales, whatsappLink: wa.kioskLink(out.enquiry.id), busy: !!out.assignment.busy });
+  res.json({ id: out.enquiry.id, firstName: out.enquiry.name.split(' ')[0], sales: out.sales, whatsappLink: wa.kioskLink(out.enquiry.id), busy: !!out.assignment.busy, formUrl: require('./apply').formUrl(out.enquiry.id) });
 }));
 
 r.get('/card/:slug.vcf', ah(async (req, res) => {

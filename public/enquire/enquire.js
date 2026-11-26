@@ -112,6 +112,7 @@
       ${s ? `<div class="cp-rm" style="text-align:left;max-width:420px;margin:0 auto 18px"><img src="${esc(s.photoUrl || '/assets/mark.png')}" alt=""><div class="grow"><div class="over" style="color:var(--cu-d)">Your relationship manager</div><b style="font-size:16px">${esc(s.name)}</b><div class="sm muted">${esc(s.designation || '')}</div></div>
         <a class="btn line icon sm" href="/card/${esc(s.slug)}.vcf" title="Save contact">${ic(I.save)}</a></div>` : ''}
       <a class="btn wa lg full" style="max-width:420px" href="${esc(j.whatsappLink)}">${ic(I.wa)} Chat on WhatsApp now</a>
+      ${j.formUrl ? `<div class="row" style="justify-content:center;margin-top:12px"><a class="btn line" target="_blank" rel="noopener" href="${esc(j.formUrl)}"><svg class="ic" viewBox="0 0 24 24"><path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v7H7z"/></svg>Print my enquiry form</a><a class="btn ghost" href="${esc(j.formUrl)}?download=1">Download PDF</a></div>` : ''}
       ${s ? `<div style="margin-top:12px"><a class="lnk" href="/card/${esc(s.slug)}">View ${esc(s.name.split(' ')[0])}'s visiting card</a></div>` : ''}
     </div>${side()}`;
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -126,6 +127,7 @@
     $('foot').textContent = `${c.org.name} · ${c.org.tagline || ''}`;
     $('callBtn').href = 'tel:+' + c.org.whatsapp;
     if (c.projects.length === 1) d.projectId = c.projects[0].id;
+    const pp = new URLSearchParams(location.search).get('p'); if (pp && c.projects.some((x) => String(x.id) === pp)) d.projectId = pp;
     render();
   }).catch(() => { $('main').innerHTML = '<div class="cp-form"><h2>We\'re offline</h2><p class="sub">Please try again in a moment.</p></div>'; });
 })();

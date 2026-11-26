@@ -99,22 +99,41 @@
   /* ======================= login ======================= */
   function renderLogin() {
     closeAll();
+    let last = ''; try { last = localStorage.getItem('mg_last_phone') || ''; } catch { /* ignore */ }
+    const hr = new Date().getHours(); const greet = hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening';
     $('root').innerHTML = `<div class="auth">
-      <div class="art rings"><img class="logo" src="/assets/logo-light.png" alt="Mihir Group">
+      <div class="art rings"><a href="/"><img class="logo" src="/assets/logo-light.png" alt="Mihir Group"></a>
+        <div class="stack-cards" aria-hidden="true">
+          <div class="fc l1"><span class="fi aq">${ic('bolt', 18)}</span><div><b>New walk-in assigned</b><small>MG-1042 · 3 BHK · Mihir Amara</small></div></div>
+          <div class="fc l2"><span class="fi cu">${ic('quote', 18)}</span><div><b>Quotation sent · ₹1.12 Cr</b><small>Opened on WhatsApp 2 min ago</small></div></div>
+          <div class="fc l3"><span class="fi in">${ic('stamp', 18)}</span><div><b>Booking approved</b><small>Flat A-1204 marked Sold</small></div></div>
+        </div>
         <h1>Every walk-in, from hello to handshake.</h1>
-        <p>Enquiries, site visits, booking applications, payments and signatures — beautifully in one place.</p>
-        <div class="feat"><span>Reception kiosk</span><span>Smart assignment</span><span>Booking application</span><span>RERA-ready</span><span>e-Visiting cards</span></div></div>
-      <div class="pane"><form id="lf" class="fade-in">
-        <div class="over" style="color:var(--cu-d)">Mihir Sales</div><h1 style="margin:6px 0 4px">Welcome back</h1><p class="muted" style="margin-bottom:26px">Log in with your registered mobile number and PIN.</p>
-        <div class="field"><label>Mobile number</label><input type="tel" name="phone" required placeholder="98XXX XXXXX" autocomplete="username" inputmode="numeric" maxlength="14"></div>
-        <div class="field"><label>PIN</label><input type="password" name="pin" required inputmode="numeric" maxlength="6" placeholder="••••" autocomplete="current-password"></div>
-        <button class="btn cu lg full mt-8" id="lb">Log in ${ic('arrow')}</button>
-        <p class="xs muted mt-16">Forgot your PIN? Your sales manager can reset it from Team.</p>
-        <a class="btn ghost full mt-16" href="/kiosk/">${ic('home2')} Open reception kiosk</a></form></div></div>`;
-    $('lf').onsubmit = run(async (ev) => {
-      ev.preventDefault(); const fd = new FormData(ev.target); $('lb').disabled = true;
-      try { await api('/api/auth/login', { json: { phone: fd.get('phone'), pin: fd.get('pin') } }); await boot(); } finally { if ($('lb')) $('lb').disabled = false; }
-    });
+        <p>Leads, follow-ups, quotations, booking applications, payments and signatures — in one place, on any device.</p>
+        <div class="feat"><span>Reception kiosk</span><span>Smart assignment</span><span>Follow-ups</span><span>Quotations</span><span>RERA-ready</span></div></div>
+      <div class="pane"><a class="btn ghost sm back" href="/">${ic('back', 15)} Home</a>
+        <form id="lf" novalidate>
+          <div class="over" style="color:var(--cu-d)">${greet}</div><h1 style="margin:6px 0 4px">Sign in to Mihir Sales</h1><p class="muted" style="margin-bottom:24px">Use your registered mobile number and PIN.</p>
+          <div class="field"><label for="lphone">Mobile number</label><div class="ph-in"><span>+91</span><input type="tel" id="lphone" required placeholder="98XXX XXXXX" autocomplete="username" inputmode="numeric" maxlength="10" value="${esc(last)}"></div></div>
+          <div class="field"><label for="lpin">PIN</label><div style="position:relative"><input type="password" id="lpin" class="pin-in" required inputmode="numeric" maxlength="6" placeholder="••••" autocomplete="current-password"><button type="button" class="btn ghost icon sm eye" id="eye" aria-label="Show PIN">${ic('eye', 17)}</button></div></div>
+          <div id="lerr" class="banner warn hide mb-12"></div>
+          <button class="btn lg full mt-8" id="lb">Sign in ${ic('arrow')}</button>
+          <p class="xs muted mt-16" style="text-align:center">Forgot your PIN? Your sales manager can reset it from <b>Team</b>.</p>
+          <div class="sep"></div>
+          <div class="row" style="justify-content:center;gap:6px"><a class="btn ghost sm" href="/kiosk/">${ic('home2', 15)} Reception kiosk</a><a class="btn ghost sm" href="/enquire/">${ic('link', 15)} Customer enquiry</a></div></form></div></div>`;
+    const ph = $('lphone'), pin = $('lpin');
+    ph.oninput = () => (ph.value = ph.value.replace(/\D/g, '').slice(-10));
+    pin.oninput = () => (pin.value = pin.value.replace(/\D/g, '').slice(0, 6));
+    (last ? pin : ph).focus();
+    $('eye').onclick = () => { pin.type = pin.type === 'password' ? 'text' : 'password'; };
+    $('lf').onsubmit = async (ev) => {
+      ev.preventDefault(); const err = $('lerr'); err.classList.add('hide'); ph.classList.remove('bad'); pin.classList.remove('bad');
+      if (!/^[6-9]\d{9}$/.test(ph.value)) { ph.parentNode.classList.add('bad'); err.textContent = 'Enter your 10-digit mobile number.'; err.classList.remove('hide'); return; }
+      if (pin.value.length < 4) { pin.classList.add('bad'); err.textContent = 'Enter your 4–6 digit PIN.'; err.classList.remove('hide'); return; }
+      const bt = $('lb'); bt.disabled = true; bt.textContent = 'Signing in…';
+      try { await api('/api/auth/login', { json: { phone: ph.value, pin: pin.value } }); try { localStorage.setItem('mg_last_phone', ph.value); } catch { /* ignore */ } await boot(); }
+      catch (e) { err.textContent = e.message; err.classList.remove('hide'); pin.value = ''; pin.focus(); bt.disabled = false; bt.innerHTML = `Sign in ${ic('arrow')}`; }
+    };
   }
 
   /* ======================= shell ======================= */
@@ -492,13 +511,21 @@
         if ($('bVisit')) $('bVisit').onclick = run(async () => { await post('visit', { units: $('svU').value, feedback: $('svF').value, note: $('svN').value }); toast('Site visit saved'); selStep = 'app'; re(); });
       } else if (selStep === 'app') {
         const submitted = ci >= si('KYC');
-        Pn.innerHTML = head('app', 'Booking application', 'The 12-section Mihir booking application, filled with the customer.') + (s === 'lock' && !e.booking ? lockNote('Opens once you have met the customer.') : `
+        const linkCard = sell && submitted === false && e.stage !== 'Lost' ? `<div class="card enq p mb-16" style="animation:none"><div class="row" style="flex-wrap:nowrap;align-items:flex-start"><span class="avatar" style="border-radius:10px;background:#fff;color:var(--aqua-d)">${ic('link', 18)}</span><div class="grow"><b>Let the customer fill it on their phone</b><p class="sm muted">Send a secure link on WhatsApp — they fill applicants, address, bank and loan details, accept the terms, and can print their copy.</p></div></div>
+            <div class="row mt-12"><button class="btn wa sm" id="bLink">${ic('wa', 15)} Send form link</button><button class="btn line sm" id="bLinkCp">${ic('copy', 15)} Copy link</button></div></div>` : '';
+        Pn.innerHTML = head('app', 'Booking application', 'The 12-section Mihir booking application, filled with the customer.') + (s === 'lock' && !e.booking ? lockNote('Opens once you have met the customer. You can already send the customer the form link to fill their details.') + `<div class="mt-16"></div>${linkCard}` : `
           ${e.booking ? `<div class="unit mb-16"><div><span>Unit</span><b>${esc(b.tower)} · ${esc(b.unit)}</b></div><div><span>Floor</span><b>${esc(b.floor || '—')}</b></div><div><span>Carpet</span><b>${esc(b.carpet_area || '—')} sq ft</b></div><div><span>Total</span><b>${inrShort(b.total_consideration)}</b></div>
             <div><span>Applicants</span><b>${esc(first((form.a1 && form.a1.name) || e.name))}${hasA2 ? ' + ' + esc(first(form.a2.name)) : ''}</b></div><div><span>Status</span><b>${submitted ? 'Submitted' : 'Draft'}</b></div></div>
             ${b.hold_until ? `<div class="banner cu mb-16">${ic('clock')}<span>Flat on hold until <b>${when(b.hold_until)}</b>.</span></div>` : ''}` : `<div class="banner info mb-16">${ic('doc')}<span>Choose the flat from live inventory and fill the application together with the customer. Drafts hold the flat for 48 hours.</span></div>`}
+          ${e.customerForm && e.customerForm.submitted_at ? `<div class="banner ok mb-16">${ic('check')}<span><b>${esc(first(e.name))} filled their details online</b> ${when(e.customerForm.submitted_at)} — applicants, address, bank and loan are pre-filled. Choose the flat and cost sheet to finish.</span></div>`
+            : e.customerForm ? `<div class="banner info mb-16">${ic('clock')}<span>${esc(first(e.name))} has started filling the application online (saved ${when(e.customerForm.updated_at)}).</span></div>` : ''}
+          ${linkCard}
           <div class="row"><button class="btn cu lg" id="bApp">${ic('doc')} ${e.booking ? (e.stage === 'Booked' || !sell ? 'View application' : 'Continue application') : 'Start booking application'}</button>
           ${e.booking ? `<a class="btn line" target="_blank" rel="noopener" href="/api/enquiries/${e.id}/application.pdf">${ic('print', 16)} Print / PDF</a>` : ''}</div>`);
         if ($('bApp')) $('bApp').onclick = run(() => openWizard(e, re));
+        const mkLink = async () => (await api(`/api/enquiries/${id}/apply-link`, { method: 'POST' })).url;
+        if ($('bLink')) $('bLink').onclick = run(async () => { const url = await mkLink(); window.open(`https://wa.me/91${e.mobile}?text=${encodeURIComponent(`Hi ${first(e.name)}, please fill your booking application for ${e.project_name} here — it saves as you go and you can print a copy:\n${url}\n— ${state.user.name}, ${state.org.name}`)}`, '_blank', 'noopener'); });
+        if ($('bLinkCp')) $('bLinkCp').onclick = run(async () => { const url = await mkLink(); try { await navigator.clipboard.writeText(url); toast('Link copied'); } catch { toast(url); } });
       } else if (selStep === 'kyc') {
         const have = new Set(e.kyc.map((k) => k.kind));
         Pn.innerHTML = head('kyc', 'KYC documents', 'Take photos with the phone camera — they are compressed automatically.') + (s === 'lock' ? lockNote('Submit the booking application first.') : `
@@ -555,8 +582,8 @@
     if (!state.form) state.form = await api('/api/booking-form');
     const F = state.form; const b = e.booking || {};
     const ro = ['Booked', 'Lost'].includes(e.stage) || !can.sell();
-    const f = JSON.parse(JSON.stringify(b.extra || {})); f.a1 = f.a1 || {}; f.a2 = f.a2 || {};
-    if (!b.extra) { Object.assign(f.a1, { name: e.name.toUpperCase(), mobile: e.mobile, email: e.email, address: e.residence, nationality: 'Indian' }); f.funding = 'Self-Funded'; f.cpName = e.cp_name || ''; f.smName = e.assigned_name || ''; f.smPhone = e.assigned_phone ? '+' + e.assigned_phone : ''; }
+    const cf = (e.customerForm && e.customerForm.data) || {}; const f = JSON.parse(JSON.stringify(b.extra || cf)); f.a1 = f.a1 || {}; f.a2 = f.a2 || {};
+    if (!b.extra) { const seed = { name: e.name.toUpperCase(), mobile: e.mobile, email: e.email, address: e.residence, nationality: 'Indian' }; Object.keys(seed).forEach((k) => { if (!f.a1[k]) f.a1[k] = seed[k]; }); f.funding = f.funding || 'Self-Funded'; f.cpName = e.cp_name || ''; f.smName = e.assigned_name || ''; f.smPhone = e.assigned_phone ? '+' + e.assigned_phone : ''; }
     if (!f.clp || !f.clp.length) f.clp = F.defaultClp.map((r) => ({ ...r, due: '' }));
     let flatId = b.flat_id || ''; let units = []; let cur = 0;
 
@@ -894,6 +921,9 @@ ${enqLink(null)}
     $('view').innerHTML = `<div class="fade-in">${pageHead('Forms', 'Every form in the app is also printable — blank for paper use, or filled from any customer page.')}
       <div class="g g2">${forms.map(([t, d, u, i]) => `<div class="card p stack gap-14"><div class="row" style="flex-wrap:nowrap"><span class="avatar lg" style="border-radius:16px;background:var(--cu-t);color:var(--cu-d)">${ic(i, 24)}</span><div class="grow"><h3>${t}</h3><p class="sm muted">${d}</p></div></div>
         <div class="row"><a class="btn cu" target="_blank" rel="noopener" href="${u}">${ic('print', 16)} Open & print</a><a class="btn line" href="${u}?download=1">Download PDF</a></div></div>`).join('')}</div>
+      <div class="card enq p mt-16"><div class="row" style="flex-wrap:nowrap;align-items:flex-start"><span class="avatar" style="border-radius:12px;background:#fff;color:var(--aqua-d)">${ic('link', 18)}</span><div class="grow"><h3>Customers fill the forms in the app</h3>
+          <p class="sm muted"><b>Enquiry form</b>: at the reception kiosk or the online link (<span class="mono">/enquire/</span>). After submitting, the customer can print or download their filled enquiry form.<br><b>Booking application</b>: open the customer → <b>Booking application</b> → <b>Send form link</b>. The customer fills their details on their phone, accepts the terms and can print the filled form. You add the flat, cost sheet and payment.</p>
+          <div class="row mt-12"><a class="btn line sm" target="_blank" rel="noopener" href="/enquire/">${ic('eye', 15)} Open enquiry form</a><a class="btn ghost sm" target="_blank" rel="noopener" href="/forms/enquiry.pdf">Public blank enquiry form</a><a class="btn ghost sm" target="_blank" rel="noopener" href="/forms/booking-application.pdf">Public blank booking form</a></div></div></div></div>
       <div class="card p mt-16 row" style="flex-wrap:nowrap"><span class="avatar" style="border-radius:12px;background:var(--navy-t)">${ic('users', 18)}</span><div class="grow"><h3>Filled forms for a customer</h3><p class="sm muted">Open any customer → <b>Enquiry form</b> or <b>Application</b> in the header. The booking application shows a DRAFT watermark until the manager signs and approves.</p></div></div></div>`;
   }
 

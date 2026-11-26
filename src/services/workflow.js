@@ -33,7 +33,7 @@ function getEnquiry(id) {
 async function fullEnquiry(id) {
   const e = await getEnquiry(id);
   if (!e) return null;
-  const [activities, booking, kyc, payments, sigs, sync, whatsapp, followups, quotations] = await Promise.all([
+  const [activities, booking, kyc, payments, sigs, sync, whatsapp, followups, quotations, customerForm] = await Promise.all([
     all('SELECT a.*, u.name user_name FROM activities a LEFT JOIN users u ON u.id=a.user_id WHERE enquiry_id=? ORDER BY a.id DESC', id),
     one('SELECT * FROM bookings WHERE enquiry_id=?', id),
     all('SELECT id, kind, file_id, original_name, uploaded_at FROM kyc_docs WHERE enquiry_id=? ORDER BY id', id),
@@ -43,8 +43,9 @@ async function fullEnquiry(id) {
     all('SELECT * FROM wa_messages WHERE enquiry_id=? ORDER BY id DESC LIMIT 30', id),
     all('SELECT f.*, u.name created_name, d.name done_name FROM followups f LEFT JOIN users u ON u.id=f.created_by LEFT JOIN users d ON d.id=f.done_by WHERE enquiry_id=? ORDER BY (f.done_at IS NOT NULL), f.due_at', id).catch(() => []),
     all('SELECT q.id, q.unit_label, q.total, q.valid_until, q.created_at, u.name created_name FROM quotations q LEFT JOIN users u ON u.id=q.created_by WHERE enquiry_id=? ORDER BY q.created_at DESC', id).catch(() => []),
+    one('SELECT data, submitted_at, updated_at FROM customer_forms WHERE enquiry_id=?', id).catch(() => null),
   ]);
-  return { ...e, activities, booking: booking || null, kyc, payments, signatures: Object.fromEntries(sigs.map((s) => [s.party, s])), sync, whatsapp, followups, quotations };
+  return { ...e, activities, booking: booking || null, kyc, payments, signatures: Object.fromEntries(sigs.map((s) => [s.party, s])), sync, whatsapp, followups, quotations, customerForm: customerForm || null };
 }
 
 function publicProfile(u) {

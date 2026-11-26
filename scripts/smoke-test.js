@@ -19,6 +19,7 @@ for (const f of ['db/test/crm_fixture.sql', 'db/migrations/001_sales_schema.sql'
 const roleSql = fs.readFileSync(path.join(root, 'db/migrations/003_app_role.sql.template'), 'utf8').replace(/__PASSWORD__/g, 'smokepass');
 const tmpSql = path.join(os.tmpdir(), DB + '.sql'); fs.writeFileSync(tmpSql, roleSql); psql(dbUrl, '-f', tmpSql); fs.rmSync(tmpSql);
 psql(dbUrl, '-f', path.join(root, 'db/migrations/005_followups_quotations.sql'));
+psql(dbUrl, '-f', path.join(root, 'db/migrations/006_customer_forms.sql'));
 const u = new URL(dbUrl); u.username = 'sales_portal'; u.password = 'smokepass';
 Object.assign(process.env, {
   DATABASE_URL: u.toString(), KIOSK_KEY: 'test-key', WA_MODE: 'mock', CRM_MODE: 'supabase', INTERNAL_MODE: 'mock', INTERNAL_WEBHOOK_SECRET: 'whsec', JWT_SECRET: 'test',
@@ -181,6 +182,27 @@ const ok = (r, label) => { if (r.status >= 400) { console.error(label, r.status,
   assert.strictEqual(onl.sales.name, 'Sneha Joshi'); console.log('  ✓ online lead goes to the RM whose link was used');
   const spam = ok(await anon('POST', '/api/public/enquiries', { name: 'Bot', mobile: '9822334456', website: 'http://spam' }), 'honeypot'); assert.strictEqual(spam.id, 'MG-0000'); console.log('  ✓ honeypot ignored');
   const rmInfo = ok(await anon('GET', `/api/public/rm/${rmSlug}`), 'RM public profile'); assert.strictEqual(rmInfo.name, 'Sneha Joshi');
+
+  console.log('Customer fills forms in the app');
+  assert.ok(sub.formUrl && sub.formUrl.includes('/f/'));
+  const fpdf = await anon('GET', sub.formUrl.replace(/^https?:\/\/[^/]+/, '')); assert.strictEqual(fpdf.status, 200); console.log('  ✓ customer prints filled enquiry form');
+  for (const u of ['/forms/enquiry.pdf', '/forms/booking-application.pdf']) assert.strictEqual((await anon('GET', u)).status, 200);
+  console.log('  ✓ blank originals are public');
+  const { url: applyLink } = ok(await sales('POST', `/api/enquiries/${rep.id}/apply-link`, {}), 'apply link');
+  const tok = new URL(applyLink).searchParams.get('t');
+  const ap = ok(await anon('GET', `/api/apply/${tok}`), 'customer opens application');
+  assert.strictEqual(ap.form.a1.mobile, '9876543210'); assert.ok(!ap.locked);
+  ok(await anon('PUT', `/api/apply/${tok}`, { form: { a1: { relation: 'Suresh Sharma' } } }), 'customer saves progress');
+  const badA = await anon('PUT', `/api/apply/${tok}`, { form: {}, submit: true }); assert.strictEqual(badA.status, 400); assert.ok(badA.data.errors.length); console.log('  ✓ incomplete submit rejected with reasons');
+  ok(await anon('PUT', `/api/apply/${tok}`, { submit: true, form: { a1: { name: 'Rahul Sharma', relation: 'Suresh Sharma', dob: '1990-05-12', gender: 'Male', pan: 'ABCDE1234F', address: 'Baner Road', city: 'Pune', pin: '411045', mobile: '9876543210' }, funding: 'Self-Funded', declarationAccepted: true } }), 'customer submits application');
+  const seen = ok(await sales('GET', `/api/enquiries/${rep.id}`), 'staff sees it').enquiry;
+  assert.ok(seen.customerForm && seen.customerForm.submitted_at && seen.customerForm.data.a1.pan === 'ABCDE1234F'); assert.ok(!('agreementValue' in seen.customerForm.data), 'customer cannot set staff fields');
+  const apdf = await anon('GET', `/api/apply/${tok}/application.pdf`); assert.strictEqual(apdf.status, 200); console.log('  ✓ customer prints filled booking application');
+  const { url: lockedLink } = ok(await sales('POST', `/api/enquiries/${sub.id}/apply-link`, {}), 'link for booked customer');
+  const lt = new URL(lockedLink).searchParams.get('t');
+  assert.ok(ok(await anon('GET', `/api/apply/${lt}`), 'booked application opens').locked);
+  assert.strictEqual((await anon('PUT', `/api/apply/${lt}`, { form: {} })).status, 400); console.log('  ✓ booked application is read-only');
+  assert.strictEqual((await anon('GET', '/api/apply/garbage')).status, 410); console.log('  ✓ bad link rejected');
 
   console.log('Reassign & cards');
   const other = board.team.find((t) => t.name !== cp.sales.name);
